@@ -1,9 +1,38 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="text-center py-5">
-    <h2 class="mb-3">Приложение MusicForge</h2>
-    <p class="text-muted">Скоро будет доступно для скачивания.</p>
-    <p class="text-muted">API уже доступен: <a href="/api/v1/docs" class="neon-link" data-no-spa>/api/v1/docs</a> · <a href="/api/v1/openapi.json" class="neon-link" data-no-spa>/api/v1/openapi.json</a></p>
-    <i class="fas fa-download fa-3x neon-text mt-4"></i>
+    <div class="mb-4">
+        <i class="fas fa-desktop fa-4x neon-text" style="color: var(--neon); text-shadow: 0 0 20px var(--neon-glow);"></i>
+    </div>
+    <h2 class="mb-3">MusicForge Desktop</h2>
+    <p class="text-muted mb-4" style="max-width: 600px; margin: 0 auto;">
+        Кроссплатформенный десктопный клиент для комфортного прослушивания музыки.
+    </p>
+
+    <div class="d-flex justify-content-center gap-3 flex-wrap mb-5">
+        <a href="https://github.com/FreshLend/MusicForge-Desktop/releases/latest" target="_blank" class="btn btn-futuristic btn-lg">
+            <i class="fas fa-download me-2"></i>Скачать последнюю версию
+        </a>
+        <a href="https://github.com/FreshLend/MusicForge-Desktop" target="_blank" class="btn btn-outline-neon btn-lg">
+            <i class="fab fa-github me-2"></i>Исходный код
+        </a>
+    </div>
+
+    <div class="glass-card d-inline-block text-start mt-2 p-4" style="min-width: 300px;">
+        <h5 class="mb-3 border-bottom border-secondary pb-2">
+            <i class="fas fa-check-circle text-neon me-2"></i>Доступные платформы
+        </h5>
+        <ul class="list-unstyled mb-0 text-muted">
+            <li class="mb-2"><i class="fab fa-windows me-2 text-white"></i> Windows (x64)</li>
+            <li class="mb-2"><i class="fab fa-apple me-2 text-white"></i> macOS (Intel / Apple Silicon)</li>
+            <li><i class="fab fa-linux me-2 text-white"></i> Linux (AppImage)</li>
+        </ul>
+    </div>
+
+    <p class="text-muted mt-5 small">
+        API уже доступен для интеграций: 
+        <a href="/api/v1/docs" class="neon-link" data-no-spa>/api/v1/docs</a> · 
+        <a href="/api/v1/openapi.json" class="neon-link" data-no-spa>/api/v1/openapi.json</a>
+    </p>
 </div>
 {% endblock %}
