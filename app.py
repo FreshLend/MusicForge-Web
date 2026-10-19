@@ -3098,7 +3098,7 @@ if __name__ == '__main__':
         if not os.path.exists(default_cover):
             Image.new('RGB', (512, 512), color='#2a2a3a').save(default_cover, 'webp')
     host = os.environ.get('HOST', '0.0.0.0')
-    port = int(os.environ.get('PORT', '5213'))
+    port = int(os.environ.get('PORT', '5000'))
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
     log.info(f'MusicForge на http://{host}:{port}')
     app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=False)
