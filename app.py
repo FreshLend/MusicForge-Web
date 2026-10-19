@@ -14,6 +14,8 @@ import logging
 from datetime import timedelta
 from functools import wraps
 from urllib.parse import urlparse
+from dotenv import load_dotenv
+load_dotenv()
 
 from flask import (Flask, render_template, request, redirect, url_for, flash,
                    jsonify, g, send_file, Blueprint, abort, session as flask_session)

@@ -7,3 +7,4 @@ flask-sock
 Pillow
 requests
 yt-dlp
+python-dotenv
