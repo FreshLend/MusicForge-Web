@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Расширенный поиск</h2>
+<form method="get" class="row g-3 mb-4">
+    <div class="col-md-3"><input name="title" class="form-control" placeholder="Название" value="{{ request_args.get('title', '') }}"></div>
+    <div class="col-md-3"><input name="artist" class="form-control" placeholder="Исполнитель" value="{{ request_args.get('artist', '') }}"></div>
+    <div class="col-md-3"><input name="tag" class="form-control" placeholder="Тег" value="{{ request_args.get('tag', '') }}"></div>
+    <div class="col-md-3">
+        <select name="is_ai" class="form-select">
+            <option value="">AI - не важно</option>
+            <option value="yes" {% if request_args.get('is_ai') == 'yes' %}selected{% endif %}>Да</option>
+            <option value="no" {% if request_args.get('is_ai') == 'no' %}selected{% endif %}>Нет</option>
+        </select>
+    </div>
+    <div class="col-12">
+        <button type="submit" class="btn btn-neon">Искать</button>
+    </div>
+</form>
+{% if tracks %}
+<div class="row">
+    {% for track in tracks %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

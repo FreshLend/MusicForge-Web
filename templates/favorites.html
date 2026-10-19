@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Избранное</h2>
+{% if tracks %}
+<div class="row">
+    {% for track in tracks %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">Нет избранных треков</p>
+{% endif %}
+{% endblock %}

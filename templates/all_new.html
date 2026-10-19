@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Все новинки (за неделю)</h2>
+<div class="row">
+    {% for track in tracks %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+{% endblock %}

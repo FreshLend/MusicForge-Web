@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Все релизы</h2>
+<div class="row">
+    {% for track in tracks.items %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+<nav>
+    <ul class="pagination justify-content-center">
+        {% if tracks.has_prev %}<li class="page-item"><a class="page-link" href="?page={{ tracks.prev_num }}">Назад</a></li>{% endif %}
+        {% for num in tracks.iter_pages() %}
+            {% if num %}<li class="page-item {% if num == tracks.page %}active{% endif %}"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>{% endif %}
+        {% endfor %}
+        {% if tracks.has_next %}<li class="page-item"><a class="page-link" href="?page={{ tracks.next_num }}">Вперёд</a></li>{% endif %}
+    </ul>
+</nav>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="profile-header mb-4">
+    <div class="row align-items-center">
+        <div class="col-md-auto text-center mb-3 mb-md-0">
+            <img src="{{ url_for('static', filename='users/' + user.user_dir_id + '/' + user.user_dir_id + '.webp') }}" class="rounded-circle" style="width: 128px; height: 128px; object-fit: cover;" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
+        </div>
+        <div class="col-md">
+            <h2 class="mb-0">{{ user.display_name }}
+                {% if user.is_admin %}<span class="badge bg-neon" style="font-size:0.7rem;">Admin</span>{% endif %}
+            </h2>
+            <p class="text-muted mb-2">@{{ user.login }}</p>
+            <p class="mb-2">{{ user.bio or 'Описание отсутствует' }}</p>
+            {% if current_user.is_authenticated and current_user.id == user.id %}
+            <a href="{{ url_for('settings') }}" class="btn btn-outline-neon btn-sm">Редактировать профиль</a>
+            {% endif %}
+            {% if current_user.is_authenticated and current_user.is_admin and current_user.id != user.id %}
+            <button class="btn btn-outline-danger btn-sm" onclick="toggleAdmin('{{ user.user_dir_id }}')">
+                {% if user.is_admin %}Снять админа{% else %}Назначить админом{% endif %}
+            </button>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<ul class="nav nav-tabs neon-tabs mb-4" id="profileTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tracks-tab" data-bs-toggle="tab" data-bs-target="#tracks" type="button" role="tab">Треки</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="playlists-tab" data-bs-toggle="tab" data-bs-target="#playlists" type="button" role="tab">Плейлисты</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats" type="button" role="tab">Статистика</button>
+    </li>
+</ul>
+
+<div class="tab-content" id="profileTabsContent">
+    <div class="tab-pane fade show active" id="tracks" role="tabpanel">
+        {% if tracks %}
+        <div class="row">
+            {% for track in tracks %}
+                {% include '_track_card.html' %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">Нет треков</p>
+        {% endif %}
+    </div>
+    <div class="tab-pane fade" id="playlists" role="tabpanel">
+        {% if playlists %}
+        <div class="row">
+            {% for pl in playlists %}
+            <div class="col-md-3 col-sm-6 mb-3">
+                <div class="playlist-card" onclick="location.href='{{ url_for('view_playlist', playlist_dir_id=pl.playlist_dir_id) }}'">
+                    <div class="playlist-info">
+                        <div class="playlist-name">{{ pl.name }}</div>
+                        <div class="playlist-author">{{ pl.owner.display_name }}</div>
+                        <span class="badge bg-{{ 'success' if pl.is_public else 'secondary' }}">{{ 'Публичный' if pl.is_public else 'Приватный' }}</span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">Нет плейлистов</p>
+        {% endif %}
+    </div>
+    <div class="tab-pane fade" id="stats" role="tabpanel">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.tracks_count }}</div>
+                    <div class="stat-label">треков</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ format_count(stats.total_likes) }}</div>
+                    <div class="stat-label">лайков</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ format_count(stats.total_plays) }}</div>
+                    <div class="stat-label">просмотров</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    async function toggleAdmin(userDirId) {
+        if (!confirm('Вы уверены?')) return;
+        const resp = await fetch('/api/admin/toggle/' + userDirId, {method: 'POST'});
+        const data = await resp.json();
+        if (data.status === 'ok') location.reload();
+        else alert('Ошибка: ' + (data.error || ''));
+    }
+    window.toggleAdmin = toggleAdmin;
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">История прослушивания</h2>
+{% if history %}
+<div class="row">
+    {% for item in history %}
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="track-card" onclick="location.href='{{ url_for('track', track_dir_id=item.track.track_dir_id) }}'">
+            <img src="{{ url_for('static', filename='users/' + item.track.uploader.user_dir_id + '/music/' + item.track.track_dir_id + '/' + item.track.track_dir_id + '.webp') }}" alt="Cover" onerror="this.src='{{ url_for('static', filename='default_cover.webp') }}'">
+            <div class="play-overlay"><i class="fas fa-play-circle"></i></div>
+            <div class="card-body">
+                <div class="card-title">{{ item.track.title }}</div>
+                <div class="card-text">{{ item.track.artist_name or item.track.uploader.display_name }}{% if item.track.is_ai %} <span class="badge bg-neon">AI</span>{% endif %}</div>
+            </div>
+            <form method="post" action="{{ url_for('delete_history_item', track_dir_id=item.track.track_dir_id) }}" style="position:absolute; top:8px; right:8px; z-index:10;" onclick="event.stopPropagation();">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Удалить из истории" onclick="return confirm('Удалить трек из истории?')"><i class="fas fa-times"></i></button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">История пуста.</p>
+{% endif %}
+{% endblock %}

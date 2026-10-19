@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Виджеты</h2>
+<p class="text-muted">Скопируйте ссылку и вставьте в OBS Browser Source. Ссылка содержит секретный токен — не публикуйте её.</p>
+
+<div class="glass p-4 mb-4">
+    <h4>Сейчас играет</h4>
+    <p class="text-muted mb-2">Показывает, что вы слушаете прямо сейчас — как на основном сайте, так и через виджет поиска. Обновляется автоматически.</p>
+    <div class="mb-3">
+        <label class="form-label">Ссылка</label>
+        <div class="input-group">
+            <input type="text" class="form-control" value="{{ now_playing_url }}" readonly>
+            <button type="button" class="btn btn-outline-neon" onclick="copyFrom(this)">Копировать</button>
+        </div>
+    </div>
+    <iframe src="{{ now_playing_url }}" width="480" height="120" frameborder="0" allow="autoplay" style="max-width:100%; border-radius:12px; background:transparent;"></iframe>
+</div>
+
+<div class="glass p-4 mb-4">
+    <h4>Поиск и плеер</h4>
+    <p class="text-muted mb-2">Поиск треков и публичных плейлистов, локальные плейлисты в браузере, управление воспроизведением. Плейлисты хранятся в localStorage браузера OBS.</p>
+    <div class="mb-3">
+        <label class="form-label">Ссылка</label>
+        <div class="input-group">
+            <input type="text" class="form-control" value="{{ search_url }}" readonly>
+            <button type="button" class="btn btn-outline-neon" onclick="copyFrom(this)">Копировать</button>
+        </div>
+    </div>
+    <iframe src="{{ search_url }}" width="480" height="520" frameborder="0" allow="autoplay" style="max-width:100%; border-radius:12px;"></iframe>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    function copyFrom(btn) {
+        const input = btn.previousElementSibling;
+        navigator.clipboard.writeText(input.value);
+        btn.textContent = 'Скопировано';
+        setTimeout(function () { btn.textContent = 'Копировать'; }, 1500);
+    }
+    window.copyFrom = copyFrom;
+})();
+</script>
+{% endblock %}

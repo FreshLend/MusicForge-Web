@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Новые релизы</h2>
+<div class="row">
+    {% for track in new_releases %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+<a href="{{ url_for('all_new') }}" class="btn btn-outline-neon mb-4">Все новинки</a>
+
+<hr class="my-5">
+<h2 class="mb-4">Популярные треки</h2>
+<div class="row">
+    {% for track in popular_tracks %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+<a href="{{ url_for('all_chart') }}" class="btn btn-outline-neon mb-4">Весь чарт</a>
+
+{% if current_user.is_authenticated and recommendations %}
+<hr class="my-5">
+<h2 class="mb-4">Рекомендации</h2>
+<div class="row">
+    {% for track in recommendations %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

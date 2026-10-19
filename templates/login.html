@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-4">
+        <div class="glass p-4">
+            <h2 class="text-center mb-4">Вход</h2>
+            <form method="post">
+                <div class="mb-3">
+                    <label class="form-label">Логин или Email</label>
+                    <input type="text" name="login" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Пароль</label>
+                    <input type="password" name="password" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-neon w-100">Войти</button>
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('register') }}" class="neon-link">Зарегистрироваться</a>
+                </div>
+            </form>
+            {% if oauth_providers %}
+            <hr>
+            <div class="d-grid gap-2">
+                {% for p in oauth_providers %}
+                    <a href="{{ url_for('oauth_start', provider=p) }}" class="btn btn-outline-neon" data-no-spa>
+                        {% if p == 'google' %}
+                            <i class="fab fa-google me-2"></i>Войти через Google
+                        {% elif p == 'github' %}
+                            <i class="fab fa-github me-2"></i>Войти через GitHub
+                        {% else %}
+                            Войти через {{ p|capitalize }}
+                        {% endif %}
+                    </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

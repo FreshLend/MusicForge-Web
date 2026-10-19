@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Мои плейлисты</h2>
+<form method="post" action="{{ url_for('create_playlist') }}" class="mb-4">
+    <div class="input-group">
+        <input type="text" name="name" class="form-control" placeholder="Название плейлиста" required>
+        <button class="btn btn-neon">Создать</button>
+    </div>
+</form>
+<div class="row">
+    {% for pl in playlists %}
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="playlist-card" onclick="openPlaylistModal('{{ pl.playlist_dir_id }}')">
+            <button class="delete-playlist-btn" onclick="event.stopPropagation(); if(confirm('Удалить плейлист «{{ pl.name }}»?')) document.getElementById('deleteForm{{ pl.playlist_dir_id }}').submit();">
+                <i class="fas fa-times"></i>
+            </button>
+            <div class="playlist-info">
+                <div class="playlist-name">{{ pl.name }}</div>
+                <div class="playlist-author">{{ pl.owner.display_name }}</div>
+                <span class="badge bg-{{ 'success' if pl.is_public else 'secondary' }}">{{ 'Публичный' if pl.is_public else 'Приватный' }}</span>
+            </div>
+        </div>
+        <form id="deleteForm{{ pl.playlist_dir_id }}" method="post" action="{{ url_for('delete_playlist', playlist_dir_id=pl.playlist_dir_id) }}" style="display:none;"></form>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="modal fade" id="playlistTracksModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h5 class="modal-title" id="modalPlaylistName"></h5>
+                <div class="modal-footer border-0">
+                    <a href="#" id="modalPlayButton" class="btn btn-neon">Воспроизвести</a>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modalTracksContainer"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    let playlistModalInstance = null;
+
+    function getPlaylistModal() {
+        if (!playlistModalInstance) {
+            playlistModalInstance = new bootstrap.Modal(document.getElementById('playlistTracksModal'));
+        }
+        return playlistModalInstance;
+    }
+
+    async function openPlaylistModal(playlistDirId) {
+        const resp = await fetch('/api/playlist/' + playlistDirId + '/tracks');
+        const data = await resp.json();
+        if (data.error) { alert('Ошибка доступа'); return; }
+        document.getElementById('modalPlaylistName').textContent = data.playlist_name;
+        const container = document.getElementById('modalTracksContainer');
+        container.innerHTML = '';
+        if (!data.tracks.length) {
+            const p = document.createElement('p');
+            p.className = 'text-muted';
+            p.textContent = 'Плейлист пуст';
+            container.appendChild(p);
+        } else {
+            const row = document.createElement('div');
+            row.className = 'row';
+            data.tracks.forEach(track => {
+                const col = document.createElement('div');
+                col.className = 'col-md-4 col-sm-6 mb-2';
+                col.dataset.trackId = track.track_dir_id;
+                const card = document.createElement('div');
+                card.className = 'track-card';
+                card.style.position = 'relative';
+                const img = document.createElement('img');
+                img.src = track.cover_url;
+                img.alt = 'Cover';
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+                const body = document.createElement('div');
+                body.className = 'card-body';
+                body.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.85));padding:0.5rem;';
+                const title = document.createElement('div');
+                title.className = 'card-title';
+                title.style.cssText = 'color:white;margin-bottom:0.1rem;';
+                title.textContent = track.title;
+                const artist = document.createElement('div');
+                artist.className = 'card-text';
+                artist.style.cssText = 'color:#ccc;font-size:0.8rem;';
+                artist.textContent = track.display_name;
+                if (track.is_ai) {
+                    const b = document.createElement('span');
+                    b.className = 'badge bg-neon';
+                    b.textContent = 'AI';
+                    artist.appendChild(document.createTextNode(' '));
+                    artist.appendChild(b);
+                }
+                const del = document.createElement('button');
+                del.className = 'delete-track-btn';
+                del.innerHTML = '<i class="fas fa-trash"></i>';
+                del.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    deleteTrack(playlistDirId, track.track_dir_id, del);
+                });
+                body.append(title, artist);
+                card.append(img, body, del);
+                col.appendChild(card);
+                row.appendChild(col);
+            });
+            container.appendChild(row);
+        }
+        document.getElementById('modalPlayButton').href = '/playlist/' + data.playlist_dir_id;
+        getPlaylistModal().show();
+    }
+
+    async function deleteTrack(playlistDirId, trackDirId, btn) {
+        if (!confirm('Удалить трек из плейлиста?')) return;
+        const r = await fetch('/playlist/' + playlistDirId + '/remove/' + trackDirId, { method: 'POST' });
+        const data = await r.json();
+        if (data.status === 'ok') {
+            const card = btn.closest('[data-track-id]');
+            if (card) card.remove();
+            const c = document.getElementById('modalTracksContainer');
+            if (!c.querySelector('.track-card')) {
+                c.textContent = '';
+                const p = document.createElement('p');
+                p.className = 'text-muted';
+                p.textContent = 'Плейлист пуст';
+                c.appendChild(p);
+            }
+        }
+    }
+
+    window.openPlaylistModal = openPlaylistModal;
+    window.deleteTrack = deleteTrack;
+})();
+</script>
+{% endblock %}

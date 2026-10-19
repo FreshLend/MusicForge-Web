@@ -1,0 +1,10 @@
+<div class="col-md-3 col-sm-6 mb-3">
+    <div class="track-card" onclick="location.href='{{ url_for('track', track_dir_id=track.track_dir_id) }}'">
+        <img src="{{ url_for('static', filename='users/' + track.uploader.user_dir_id + '/music/' + track.track_dir_id + '/' + track.track_dir_id + '.webp') }}" alt="Cover" onerror="this.src='{{ url_for('static', filename='default_cover.webp') }}'">
+        <div class="play-overlay"><i class="fas fa-play-circle"></i></div>
+        <div class="card-body">
+            <div class="card-title">{{ track.title }}</div>
+            <div class="card-text"><a href="{{ url_for('user_profile', user_dir_id=track.uploader.user_dir_id) }}" class="text-decoration-none" style="color: #ccc;">{{ track.artist_name or track.uploader.display_name }}</a>{% if track.is_ai %} <span class="badge bg-neon">AI</span>{% endif %}</div>
+        </div>
+    </div>
+</div>

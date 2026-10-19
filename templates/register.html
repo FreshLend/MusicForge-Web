@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="glass p-4">
+            <h2 class="text-center mb-4">Регистрация</h2>
+            <form method="post">
+                <div class="mb-3">
+                    <label class="form-label">Логин</label>
+                    <input type="text" name="login" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Email</label>
+                    <input type="email" name="email" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Пароль (минимум 8 символов)</label>
+                    <input type="password" name="password" class="form-control" required minlength="8">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Подтверждение пароля</label>
+                    <input type="password" name="password2" class="form-control" required minlength="8">
+                </div>
+                <button type="submit" class="btn btn-neon w-100">Зарегистрироваться</button>
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('login') }}" class="neon-link">Уже есть аккаунт? Войти</a>
+                </div>
+            </form>
+            {% if oauth_providers %}
+            <hr>
+            <div class="d-grid gap-2">
+                {% for p in oauth_providers %}
+                    <a href="{{ url_for('oauth_start', provider=p) }}" class="btn btn-outline-neon" data-no-spa>
+                        {% if p == 'google' %}
+                            <i class="fab fa-google me-2"></i>Продолжить с Google
+                        {% elif p == 'github' %}
+                            <i class="fab fa-github me-2"></i>Продолжить с GitHub
+                        {% else %}
+                            Продолжить с {{ p|capitalize }}
+                        {% endif %}
+                    </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Опубликовать трек</h2>
+
+<ul class="nav nav-tabs neon-tabs mb-4" id="uploadTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="file-tab" data-bs-toggle="tab" data-bs-target="#file" type="button" role="tab">Файл</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="youtube-tab" data-bs-toggle="tab" data-bs-target="#youtube" type="button" role="tab">YouTube</button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="file" role="tabpanel">
+        <form method="post" enctype="multipart/form-data" data-no-spa>
+            <input type="hidden" name="upload_type" value="file">
+            <div class="mb-3">
+                <label class="form-label">Название</label>
+                <input type="text" name="title" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Исполнитель (если это не ваш трек)</label>
+                <input type="text" name="artist_name" class="form-control" placeholder="Имя исполнителя">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Теги (через запятую)</label>
+                <input type="text" name="tags" class="form-control">
+            </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" name="is_ai" id="is_ai_file" class="form-check-input">
+                <label class="form-check-label" for="is_ai_file">Сделано с помощью ИИ</label>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Аудиофайл (mp3, wav, ogg, m4a)</label>
+                <input type="file" name="audio_file" class="form-control" accept=".mp3,.wav,.ogg,.m4a" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Обложка (Изображение)</label>
+                <input type="file" name="cover_file" class="form-control" accept="image/*">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Клип (Видео)</label>
+                <input type="file" name="cover_video_file" class="form-control" accept="video/*">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Субтитры (файл .srt, необязательно)</label>
+                <input type="file" name="lyrics_file" class="form-control" accept=".srt">
+                <small class="text-muted">Поддерживается формат SRT с таймингами</small>
+            </div>
+            <div class="upload-progress" id="uploadProgressWrapper" style="display:none;">
+                <div class="upload-progress-bar"><div class="upload-progress-fill" id="uploadProgressFill"></div></div>
+                <div class="upload-progress-text" id="uploadProgressText">Загрузка...</div>
+            </div>
+            <button type="submit" class="btn btn-neon">Опубликовать</button>
+        </form>
+    </div>
+    <div class="tab-pane fade" id="youtube" role="tabpanel">
+        <form method="post" enctype="multipart/form-data" data-no-spa>
+            <input type="hidden" name="upload_type" value="youtube">
+            <div class="mb-3">
+                <label class="form-label">Ссылка на YouTube видео</label>
+                <input type="url" name="youtube_url" class="form-control" placeholder="https://www.youtube.com/watch?v=..." required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Исполнитель (необязательно)</label>
+                <input type="text" name="artist_name" class="form-control" placeholder="Имя исполнителя">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Теги (через запятую)</label>
+                <input type="text" name="tags" class="form-control">
+            </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" name="is_ai" id="is_ai_yt" class="form-check-input">
+                <label class="form-check-label" for="is_ai_yt">Сделано с помощью ИИ</label>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Субтитры (файл .srt, необязательно)</label>
+                <input type="file" name="lyrics_file" class="form-control" accept=".srt">
+            </div>
+            <button type="submit" class="btn btn-neon">Загрузить с YouTube</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    document.querySelectorAll('input[type="file"]').forEach(function (input) {
+        input.addEventListener('change', function () {
+            const file = this.files[0];
+            if (file && file.size > 500 * 1024 * 1024) {
+                alert('Файл слишком большой (максимум 500 МБ)');
+                this.value = '';
+            }
+        });
+    });
+
+    document.querySelectorAll('form[data-no-spa]').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const wrapper = document.getElementById('uploadProgressWrapper');
+            const fill = document.getElementById('uploadProgressFill');
+            const text = document.getElementById('uploadProgressText');
+            if (!wrapper || !fill || !text) { form.submit(); return; }
+            wrapper.style.display = 'block';
+            fill.style.width = '0%';
+            text.textContent = 'Загрузка... 0%';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', form.action || window.location.href, true);
+            xhr.upload.addEventListener('progress', function (ev) {
+                if (ev.lengthComputable) {
+                    const pct = (ev.loaded / ev.total) * 100;
+                    fill.style.width = pct + '%';
+                    text.textContent = 'Загрузка... ' + Math.round(pct) + '%';
+                }
+            });
+            xhr.upload.addEventListener('load', function () {
+                fill.style.width = '100%';
+                text.textContent = 'Обработка на сервере...';
+            });
+            xhr.addEventListener('load', function () {
+                if (xhr.status >= 200 && xhr.status < 400) {
+                    const doc = new DOMParser().parseFromString(xhr.responseText, 'text/html');
+                    if (window.SPA && window.SPA.replaceContent) {
+                        window.SPA.replaceContent(doc);
+                        history.pushState({ spa: true }, '', xhr.responseURL || window.location.href);
+                        window.scrollTo(0, 0);
+                    } else {
+                        window.location.href = xhr.responseURL || window.location.href;
+                    }
+                } else {
+                    wrapper.style.display = 'none';
+                    if (submitBtn) submitBtn.disabled = false;
+                    alert('Ошибка: ' + xhr.status);
+                }
+            });
+            xhr.addEventListener('error', function () {
+                wrapper.style.display = 'none';
+                if (submitBtn) submitBtn.disabled = false;
+                alert('Сетевая ошибка');
+            });
+            xhr.send(new FormData(form));
+        }, true);
+    });
+})();
+</script>
+{% endblock %}

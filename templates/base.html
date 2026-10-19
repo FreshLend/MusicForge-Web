@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
+    <title>MusicForge</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app-content">
+        <nav class="navbar navbar-expand-lg sticky-top">
+            <div class="container-fluid">
+                <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+                    <img src="{{ url_for('static', filename='favicon.ico') }}" alt="" style="height: 48px; width: 48px;">
+                    <span><span class="brand-music">Music</span><span class="brand-forge">Forge</span></span>
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('releases') }}">Релизы</a></li>
+                    </ul>
+                    <ul class="navbar-nav ms-auto align-items-center">
+                        <li class="nav-item">
+                            <a class="nav-link icon-link" href="{{ url_for('random_track') }}" title="Случайный релиз"><i class="fas fa-random"></i></a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link icon-link" href="#" data-bs-toggle="modal" data-bs-target="#searchModal" title="Поиск"><i class="fas fa-search"></i></a>
+                        </li>
+                        {% if current_user.is_authenticated %}
+                        <li class="nav-item">
+                            <a class="nav-link icon-link" href="{{ url_for('upload') }}" title="Опубликовать трек"><i class="fas fa-plus"></i></a>
+                        </li>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <img src="{{ url_for('static', filename='users/' + current_user.user_dir_id + '/' + current_user.user_dir_id + '.webp') }}" class="rounded-circle avatar-small" alt="Avatar" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                                <li>
+                                    <div class="dropdown-item-text text-center">
+                                        <img src="{{ url_for('static', filename='users/' + current_user.user_dir_id + '/' + current_user.user_dir_id + '.webp') }}" class="rounded-circle mb-2 avatar-medium" alt="Avatar" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
+                                        <strong class="d-block">{{ current_user.display_name }}</strong>
+                                        <small class="text-muted">@{{ current_user.login }}</small>
+                                    </div>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('user_profile', user_dir_id=current_user.user_dir_id) }}"><i class="fas fa-user me-2"></i>Мой профиль</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('favorites') }}"><i class="fas fa-heart me-2"></i>Избранное</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('playlists') }}"><i class="fas fa-list me-2"></i>Плейлисты</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('listening_history') }}"><i class="fas fa-history me-2"></i>История</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('widgets') }}"><i class="fas fa-broadcast-tower me-2"></i>Виджеты</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('settings') }}"><i class="fas fa-cog me-2"></i>Настройки</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt me-2"></i>Выход</a></li>
+                            </ul>
+                        </li>
+                        {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link btn btn-outline-neon btn-sm" href="{{ url_for('login') }}">Войти</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </nav>
+
+        <div class="modal fade" id="createPlaylistModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header border-0">
+                        <h5 class="modal-title">Новый плейлист</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form method="post" action="{{ url_for('create_playlist') }}">
+                        <div class="modal-body">
+                            <input type="text" name="name" class="form-control" placeholder="Название плейлиста" required>
+                        </div>
+                        <div class="modal-footer border-0">
+                            <button type="submit" class="btn btn-neon">Создать</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="searchModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header border-0">
+                        <h5 class="modal-title">Поиск</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form action="{{ url_for('search') }}" method="get">
+                            <input type="text" name="q" class="form-control" placeholder="Название или исполнитель">
+                            <button type="submit" class="btn btn-neon mt-2 w-100">Искать</button>
+                            <a href="{{ url_for('advanced_search') }}" class="btn btn-link neon-link mt-1">Расширенный поиск</a>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="container mt-4">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show neon-alert">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <div id="mini-player" class="mini-player" style="display:none;">
+        <div class="mp-progress-wrap" id="mp-progress-wrap">
+            <div class="mp-progress-fill" id="mp-progress-fill"></div>
+        </div>
+        <img id="mp-cover" class="mp-cover" src="" alt="" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_cover.webp') }}';">
+        <div class="mp-info">
+            <div id="mp-title" class="mp-title"></div>
+            <div id="mp-artist" class="mp-artist"></div>
+        </div>
+        <div class="mp-controls">
+            <button id="mp-prev" class="mp-btn" title="Назад"><i class="fas fa-step-backward"></i></button>
+            <button id="mp-play" class="mp-btn mp-play"><i class="fas fa-play"></i></button>
+            <button id="mp-next" class="mp-btn" title="Вперёд"><i class="fas fa-step-forward"></i></button>
+            <button id="mp-loop" class="mp-btn" title="Зациклить"><i class="fas fa-redo"></i></button>
+        </div>
+        <div class="mp-time" id="mp-time">0:00 / 0:00</div>
+        <div class="mp-volume">
+            <i class="fas fa-volume-up" id="mp-vol-icon"></i>
+            <input type="range" id="mp-vol-slider" min="0" max="1" step="0.01" value="1">
+        </div>
+        <button id="mp-close" class="mp-btn" title="Закрыть"><i class="fas fa-times"></i></button>
+    </div>
+    <audio id="globalAudio" preload="metadata"></audio>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+    (function () {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        var token = meta ? meta.content : '';
+        if (!token) return;
+        var origFetch = window.fetch;
+        window.fetch = function (url, opts) {
+            opts = opts || {};
+            var m = (opts.method || 'GET').toUpperCase();
+            if (m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS') {
+                var h = new Headers(opts.headers || {});
+                if (!h.has('X-CSRFToken')) h.set('X-CSRFToken', token);
+                opts.headers = h;
+            }
+            return origFetch(url, opts);
+        };
+        var _open = XMLHttpRequest.prototype.open;
+        var _send = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method) {
+            this._mfMethod = (method || 'GET').toUpperCase();
+            return _open.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+            if (this._mfMethod && this._mfMethod !== 'GET' && this._mfMethod !== 'HEAD') {
+                try { this.setRequestHeader('X-CSRFToken', token); } catch (e) {}
+            }
+            return _send.apply(this, arguments);
+        };
+        function inject() {
+            var forms = document.querySelectorAll('form');
+            for (var i = 0; i < forms.length; i++) {
+                var f = forms[i];
+                var m = (f.getAttribute('method') || 'GET').toUpperCase();
+                if (m !== 'POST') continue;
+                if (f.querySelector('input[name="csrf_token"]')) continue;
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'csrf_token';
+                inp.value = token;
+                f.appendChild(inp);
+            }
+        }
+        if (document.body) {
+            inject();
+            new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
+        } else {
+            document.addEventListener('DOMContentLoaded', function () {
+                inject();
+                new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
+            });
+        }
+    })();
+    </script>
+
+    <script>
+    (function () {
+        const audio = document.getElementById('globalAudio');
+        const miniPlayer = document.getElementById('mini-player');
+        const mpCover = document.getElementById('mp-cover');
+        const mpTitle = document.getElementById('mp-title');
+        const mpArtist = document.getElementById('mp-artist');
+        const mpPrev = document.getElementById('mp-prev');
+        const mpPlay = document.getElementById('mp-play');
+        const mpNext = document.getElementById('mp-next');
+        const mpLoop = document.getElementById('mp-loop');
+        const mpProgressWrap = document.getElementById('mp-progress-wrap');
+        const mpProgressFill = document.getElementById('mp-progress-fill');
+        const mpTime = document.getElementById('mp-time');
+        const mpVolume = document.getElementById('mp-vol-slider');
+        const mpVolIcon = document.getElementById('mp-vol-icon');
+        const mpClose = document.getElementById('mp-close');
+
+        const STORAGE_KEY = 'musicforge_player_v1';
+        const TAB_OWNER_KEY = 'musicforge_player_tab';
+
+        const state = { queue: [], index: -1, sourceType: 'single', sourceName: '' };
+        const listeners = { play: [], pause: [], ended: [], timeupdate: [], loadedmetadata: [], seeked: [], trackchange: [], loopchange: [], volumechange: [], close: [] };
+        let pageListeners = [];
+        let listenReportedForId = null;
+        let audioCtx = null;
+        let analyser = null;
+        let mediaSource = null;
+
+        function ensureAudioContext() {
+            if (!audioCtx) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    analyser.smoothingTimeConstant = 0.6;
+                    mediaSource = audioCtx.createMediaElementSource(audio);
+                    mediaSource.connect(analyser);
+                    analyser.connect(audioCtx.destination);
+                } catch (e) {
+                    audioCtx = null; analyser = null; mediaSource = null;
+                    return null;
+                }
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume().catch(function () {});
+            return { audioCtx: audioCtx, analyser: analyser };
+        }
+        function resumeCtx() { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function () {}); }
+        function emit(event, data) { const arr = listeners[event]; if (!arr) return; for (let i = 0; i < arr.length; i++) { try { arr[i](data); } catch (e) {} } }
+        function on(event, fn) { if (!listeners[event]) listeners[event] = []; listeners[event].push(fn); pageListeners.push({ event: event, fn: fn }); }
+        function clearPageListeners() {
+            for (let i = 0; i < pageListeners.length; i++) {
+                const item = pageListeners[i]; const arr = listeners[item.event]; if (!arr) continue;
+                const idx = arr.indexOf(item.fn); if (idx >= 0) arr.splice(idx, 1);
+            }
+            pageListeners = [];
+        }
+        function formatTime(s) { if (!isFinite(s) || isNaN(s)) return '0:00'; const m = Math.floor(s / 60); const sec = Math.floor(s % 60); return m + ':' + (sec < 10 ? '0' + sec : sec); }
+        function updateVolIcon() { const v = audio.volume; if (v === 0) mpVolIcon.className = 'fas fa-volume-mute'; else if (v < 0.5) mpVolIcon.className = 'fas fa-volume-down'; else mpVolIcon.className = 'fas fa-volume-up'; }
+        function updateUI() {
+            if (state.index < 0 || state.index >= state.queue.length) { miniPlayer.style.display = 'none'; document.body.classList.remove('has-mini-player'); return; }
+            miniPlayer.style.display = 'flex';
+            document.body.classList.add('has-mini-player');
+            const t = state.queue[state.index];
+            mpCover.onerror = function () { this.onerror = null; this.src = '{{ url_for("static", filename="default_cover.webp") }}'; };
+            mpCover.src = t.cover || '{{ url_for("static", filename="default_cover.webp") }}';
+            mpTitle.textContent = t.title || '';
+            mpArtist.textContent = t.artist || '';
+            mpPlay.innerHTML = audio.paused ? '<i class="fas fa-play"></i>' : '<i class="fas fa-pause"></i>';
+            mpLoop.classList.toggle('active', !!audio.loop);
+            const multi = state.queue.length > 1;
+            mpPrev.style.display = multi ? '' : 'none';
+            mpNext.style.display = multi ? '' : 'none';
+        }
+        function saveState() {
+            try {
+                sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ queue: state.queue, index: state.index, sourceType: state.sourceType, sourceName: state.sourceName, volume: audio.volume, loop: audio.loop, position: audio.currentTime, playing: !audio.paused, savedAt: Date.now() }));
+                sessionStorage.setItem(TAB_OWNER_KEY, '1');
+            } catch (e) {}
+        }
+        function playIndex(idx, autoplay) {
+            if (idx < 0 || idx >= state.queue.length) return;
+            state.index = idx;
+            listenReportedForId = null;
+            const t = state.queue[idx];
+            audio.src = t.file;
+            try { audio.load(); } catch (e) {}
+            if (autoplay !== false) audio.play().catch(function () {});
+            updateUI(); saveState(); emit('trackchange', t);
+        }
+        function playTrack(track) { if (!track) return; state.queue = [track]; state.sourceType = 'single'; state.sourceName = track.title || ''; playIndex(0, true); }
+        function playPlaylist(tracks, startIndex, name) {
+            if (!tracks || !tracks.length) return;
+            state.queue = tracks.slice(); state.sourceType = 'playlist'; state.sourceName = name || '';
+            playIndex(startIndex || 0, true);
+        }
+        function setQueuePreserveState(newQueue, startIndex, name) {
+            if (!newQueue || !newQueue.length) return;
+            const cur = getCurrentTrack();
+            const newIdx = (typeof startIndex === 'number' && startIndex >= 0 && startIndex < newQueue.length) ? startIndex : 0;
+            const matches = cur && newQueue[newIdx] && cur.id === newQueue[newIdx].id;
+            state.queue = newQueue.slice(); state.sourceType = 'playlist'; state.sourceName = name || '';
+            if (matches) { state.index = newIdx; updateUI(); saveState(); }
+            else { playIndex(newIdx, true); }
+        }
+        function togglePlay() { if (state.index < 0) return; if (audio.paused) audio.play().catch(function () {}); else audio.pause(); }
+        function next() { if (state.queue.length <= 1) return; playIndex((state.index + 1) % state.queue.length); }
+        function prev() { if (state.queue.length <= 1) return; playIndex((state.index - 1 + state.queue.length) % state.queue.length); }
+        function close() {
+            audio.pause(); audio.removeAttribute('src'); try { audio.load(); } catch (e) {}
+            state.queue = []; state.index = -1; state.sourceType = 'single'; state.sourceName = '';
+            listenReportedForId = null;
+            miniPlayer.style.display = 'none';
+            document.body.classList.remove('has-mini-player');
+            try { sessionStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(TAB_OWNER_KEY); } catch (e) {}
+            emit('close');
+        }
+        function getCurrentTrack() { if (state.index < 0 || state.index >= state.queue.length) return null; return state.queue[state.index]; }
+
+        mpPlay.addEventListener('click', togglePlay);
+        mpPrev.addEventListener('click', prev);
+        mpNext.addEventListener('click', next);
+        mpClose.addEventListener('click', close);
+        mpLoop.addEventListener('click', function () { audio.loop = !audio.loop; mpLoop.classList.toggle('active', audio.loop); saveState(); emit('loopchange', audio.loop); });
+        mpVolume.addEventListener('input', function () { audio.volume = parseFloat(this.value); updateVolIcon(); saveState(); });
+        mpVolIcon.addEventListener('click', function () {
+            if (audio.volume > 0) { audio.dataset.prevVolume = String(audio.volume); audio.volume = 0; mpVolume.value = 0; }
+            else { const v = parseFloat(audio.dataset.prevVolume || '1'); audio.volume = v; mpVolume.value = v; }
+            updateVolIcon(); saveState();
+        });
+        mpProgressWrap.addEventListener('click', function (e) {
+            if (!isFinite(audio.duration) || audio.duration <= 0) return;
+            const rect = mpProgressWrap.getBoundingClientRect();
+            const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+            audio.currentTime = pct * audio.duration;
+        });
+        audio.addEventListener('play', function () { resumeCtx(); updateUI(); saveState(); emit('play'); });
+        audio.addEventListener('pause', function () { updateUI(); saveState(); emit('pause'); });
+        audio.addEventListener('ended', function () { emit('ended'); if (audio.loop) return; if (state.queue.length > 1) next(); else { updateUI(); saveState(); } });
+        audio.addEventListener('timeupdate', function () {
+            const dur = audio.duration || 0;
+            const pct = dur > 0 ? (audio.currentTime / dur) * 100 : 0;
+            mpProgressFill.style.width = pct + '%';
+            mpTime.textContent = formatTime(audio.currentTime) + ' / ' + formatTime(dur);
+            if (state.index >= 0 && state.index < state.queue.length) {
+                const t = state.queue[state.index];
+                if (t && t.id && listenReportedForId !== t.id && audio.currentTime >= 15) {
+                    listenReportedForId = t.id;
+                    fetch('/api/listen/' + t.id, { method: 'POST' }).catch(function () {});
+                }
+            }
+            emit('timeupdate');
+        });
+        audio.addEventListener('loadedmetadata', function () { const dur = audio.duration || 0; mpTime.textContent = formatTime(audio.currentTime) + ' / ' + formatTime(dur); emit('loadedmetadata'); });
+        audio.addEventListener('seeked', function () { emit('seeked'); });
+        audio.addEventListener('volumechange', function () { mpVolume.value = audio.volume; updateVolIcon(); emit('volumechange', audio.volume); });
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) resumeCtx(); });
+        let saveThrottle = null;
+        audio.addEventListener('timeupdate', function () {
+            if (saveThrottle) return;
+            saveThrottle = setTimeout(function () { saveThrottle = null; saveState(); }, 2000);
+        });
+        function restoreState() {
+            try {
+                if (!sessionStorage.getItem(TAB_OWNER_KEY)) return;
+                const raw = sessionStorage.getItem(STORAGE_KEY); if (!raw) return;
+                const s = JSON.parse(raw);
+                if (!s.queue || !s.queue.length) return;
+                if (s.savedAt && Date.now() - s.savedAt > 3600 * 1000) return;
+                state.queue = s.queue;
+                state.index = (typeof s.index === 'number' && s.index >= 0 && s.index < s.queue.length) ? s.index : 0;
+                state.sourceType = s.sourceType || 'single'; state.sourceName = s.sourceName || '';
+                audio.volume = typeof s.volume === 'number' ? s.volume : 1;
+                mpVolume.value = audio.volume; updateVolIcon(); audio.loop = !!s.loop;
+                const t = state.queue[state.index]; if (!t) return;
+                audio.src = t.file; try { audio.load(); } catch (e) {}
+                if (s.position && isFinite(s.position)) {
+                    audio.addEventListener('loadedmetadata', function handler() { audio.currentTime = s.position; audio.removeEventListener('loadedmetadata', handler); });
+                }
+                updateUI(); if (s.playing) audio.play().catch(function () {});
+            } catch (e) {}
+        }
+        window.addEventListener('pagehide', saveState);
+        window.addEventListener('beforeunload', saveState);
+
+        window.Player = {
+            playTrack: playTrack, playPlaylist: playPlaylist, setQueuePreserveState: setQueuePreserveState,
+            togglePlay: togglePlay, next: next, prev: prev, close: close, on: on,
+            clearPageListeners: clearPageListeners, ensureAudioContext: ensureAudioContext,
+            resumeCtx: resumeCtx, getCurrentTrack: getCurrentTrack,
+            getState: function () { return state; },
+            getAudio: function () { return audio; },
+            isPlaying: function () { return !audio.paused; },
+            formatTime: formatTime
+        };
+        updateVolIcon(); restoreState(); updateUI();
+    })();
+    </script>
+
+    <div id="page-scripts">{% block scripts %}{% endblock %}</div>
+
+    <script>
+    (function () {
+        function closeAllModals() {
+            document.querySelectorAll('.modal.show').forEach(function (m) {
+                const inst = bootstrap.Modal.getInstance(m); if (inst) inst.hide();
+            });
+            document.querySelectorAll('.modal-backdrop').forEach(function (el) { el.remove(); });
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+        }
+        function extractScripts(doc) {
+            const container = document.getElementById('page-scripts');
+            if (!container) return;
+            if (window.Player && window.Player.clearPageListeners) window.Player.clearPageListeners();
+            container.innerHTML = '';
+            const newScripts = doc.getElementById('page-scripts');
+            if (!newScripts) return;
+            newScripts.querySelectorAll('script').forEach(function (oldScript) {
+                try {
+                    const newScript = document.createElement('script');
+                    Array.from(oldScript.attributes).forEach(function (attr) { newScript.setAttribute(attr.name, attr.value); });
+                    newScript.textContent = oldScript.textContent;
+                    container.appendChild(newScript);
+                } catch (err) {
+                    console.error('Script execution failed:', err);
+                }
+            });
+        }
+        function replaceContent(doc) {
+            const newContent = doc.getElementById('app-content');
+            if (!newContent) return false;
+            closeAllModals();
+            document.getElementById('app-content').innerHTML = newContent.innerHTML;
+            extractScripts(doc);
+            document.title = doc.title || document.title;
+            return true;
+        }
+        async function navigateTo(url, pushState, replace) {
+            const audio = document.getElementById('globalAudio');
+            const wasPlaying = audio && !audio.paused;
+            try {
+                const resp = await fetch(url, { headers: { 'X-Requested-With': 'SPA' }, credentials: 'same-origin' });
+                if (!resp.ok) { window.location.href = url; return; }
+                const html = await resp.text();
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                if (!replaceContent(doc)) { window.location.href = url; return; }
+                const finalUrl = resp.url || url;
+                let finalPath = finalUrl;
+                try { const u = new URL(finalUrl, window.location.origin); finalPath = u.pathname + u.search + u.hash; } catch (e) {}
+                if (pushState === false) {}
+                else if (replace) history.replaceState({ spa: true }, '', finalPath);
+                else history.pushState({ spa: true }, '', finalPath);
+                window.scrollTo(0, 0);
+                if (wasPlaying) { if (window.Player && window.Player.resumeCtx) window.Player.resumeCtx(); if (audio.paused) audio.play().catch(function () {}); }
+            } catch (e) { window.location.href = url; }
+        }
+        function isInternal(url) { try { const u = new URL(url, window.location.origin); return u.origin === window.location.origin; } catch (e) { return false; } }
+        document.addEventListener('click', function (e) {
+            if (e.defaultPrevented) return;
+            if (e.button !== 0) return;
+            if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+            const target = e.target;
+            const link = target.closest('a');
+            if (link) {
+                if (link.dataset.noSpa !== undefined) return;
+                if (link.hasAttribute('download')) return;
+                const tgt = link.getAttribute('target');
+                if (tgt && tgt !== '_self') return;
+                const href = link.getAttribute('href');
+                if (!href) return;
+                if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+                if (!isInternal(href)) return;
+                e.preventDefault(); e.stopPropagation();
+                navigateTo(new URL(href, window.location.href).href);
+                return;
+            }
+            const card = target.closest('[onclick*="location.href"]');
+            if (card) {
+                if (target.closest('button, form, input, select, textarea')) return;
+                const onclick = card.getAttribute('onclick') || '';
+                const m = onclick.match(/location\.href\s*=\s*['"]([^'"]+)['"]/);
+                if (!m) return;
+                if (!isInternal(m[1])) return;
+                e.preventDefault(); e.stopPropagation();
+                navigateTo(new URL(m[1], window.location.href).href);
+            }
+        }, true);
+        document.addEventListener('submit', async function (e) {
+            const form = e.target;
+            if (form.dataset.noSpa !== undefined) return;
+            if (form.hasAttribute('data-no-spa')) return;
+            const method = (form.method || 'GET').toUpperCase();
+            const action = form.getAttribute('action') || window.location.href;
+            if (method === 'GET') {
+                e.preventDefault(); e.stopPropagation();
+                const fd = new FormData(form);
+                const url = new URL(action, window.location.href);
+                url.search = '';
+                fd.forEach(function (v, k) { url.searchParams.append(k, v); });
+                navigateTo(url.href);
+                return;
+            }
+            e.preventDefault(); e.stopPropagation();
+            const fd = new FormData(form);
+            const audio = document.getElementById('globalAudio');
+            const wasPlaying = audio && !audio.paused;
+            try {
+                const resp = await fetch(action, { method: method, body: fd, credentials: 'same-origin', redirect: 'follow' });
+                const html = await resp.text();
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                if (!replaceContent(doc)) { window.location.href = action; return; }
+                let finalPath = resp.url || action;
+                try { const u = new URL(finalPath, window.location.origin); finalPath = u.pathname + u.search + u.hash; } catch (err) {}
+                history.pushState({ spa: true }, '', finalPath);
+                window.scrollTo(0, 0);
+                if (wasPlaying) { if (window.Player && window.Player.resumeCtx) window.Player.resumeCtx(); if (audio.paused) audio.play().catch(function () {}); }
+            } catch (err) { form.submit(); }
+        }, true);
+        window.addEventListener('popstate', function () {
+            navigateTo(window.location.pathname + window.location.search + window.location.hash, false);
+        });
+        window.SPA = { replaceContent: replaceContent, navigateTo: navigateTo };
+    })();
+    </script>
+</body>
+</html>

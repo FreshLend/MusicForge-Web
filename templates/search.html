@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Результаты поиска по "{{ query }}"</h2>
+{% if tracks %}
+<div class="row">
+    {% for track in tracks %}
+        {% include '_track_card.html' %}
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">Ничего не найдено</p>
+{% endif %}
+{% endblock %}

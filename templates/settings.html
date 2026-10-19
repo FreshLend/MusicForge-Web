@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Настройки</h2>
+<form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="action" value="profile">
+    <div class="mb-3">
+        <label class="form-label">Отображаемое имя</label>
+        <input type="text" name="display_name" class="form-control" value="{{ current_user.display_name }}">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Email</label>
+        <input type="email" name="email" class="form-control" value="{{ current_user.email }}">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Аватар</label>
+        <input type="file" name="avatar" class="form-control" accept="image/*">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">О себе</label>
+        <textarea name="bio" class="form-control" rows="3">{{ current_user.bio or '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-neon">Сохранить профиль</button>
+</form>
+<hr>
+<form method="post">
+    <input type="hidden" name="action" value="regenerate_widget_token">
+    <h4>Виджеты</h4>
+    <div class="mb-3">
+        <label class="form-label">Секретный токен</label>
+        <div class="input-group">
+            <input type="text" class="form-control" value="{{ current_user.widget_token or '' }}" readonly id="widgetToken">
+            <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('widgetToken').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
+            <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Перегенерировать токен? Все существующие виджеты перестанут работать.')">Перегенерировать</button>
+        </div>
+        <small class="text-muted">Токен даёт доступ к информации «сейчас играет». Не публикуйте его.</small>
+    </div>
+</form>
+<hr>
+<form method="post">
+    <input type="hidden" name="action" value="regenerate_api_token">
+    <h4>API токен (Bearer)</h4>
+    {% if one_time_token %}
+    <div class="alert alert-success">
+        <div class="mb-2"><strong>Скопируйте сейчас</strong> — токен больше не будет показан.</div>
+        <div class="input-group mb-2">
+            <input type="text" class="form-control" value="{{ one_time_token }}" readonly id="oneApi">
+            <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('oneApi').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
+        </div>
+        {% if one_time_refresh %}
+        <div class="mb-1"><small>Refresh token — для обновления access через <code>/api/v1/auth/refresh</code>:</small></div>
+        <div class="input-group">
+            <input type="text" class="form-control" value="{{ one_time_refresh }}" readonly id="oneRefresh">
+            <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('oneRefresh').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="text-muted mb-2">Используется для доступа из приложений через заголовок <code>Authorization: Bearer &lt;token&gt;</code>. Токен не отображается после выдачи.</p>
+    {% endif %}
+    <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Выпустить новый токен? Все приложения потеряют доступ.')">Выпустить новый токен</button>
+</form>
+<hr>
+<form method="post">
+    <input type="hidden" name="action" value="password">
+    <h4>Сменить пароль</h4>
+    <div class="mb-3">
+        <label class="form-label">Текущий пароль</label>
+        <input type="password" name="current_password" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Новый пароль (минимум 8 символов)</label>
+        <input type="password" name="new_password" class="form-control" required minlength="8">
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Подтвердите новый пароль</label>
+        <input type="password" name="confirm_password" class="form-control" required minlength="8">
+    </div>
+    <button type="submit" class="btn btn-neon">Сменить пароль</button>
+</form>
+{% endblock %}

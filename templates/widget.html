@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MusicForge Widget</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; background: transparent; font-family: 'Inter', sans-serif; overflow: hidden; }
+        #widget-container { position: relative; width: 100%; height: 100%; }
+        .track-info {
+            position: absolute; top: 0; right: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px);
+            border-radius: 16px; padding: 12px 16px;
+            display: flex; align-items: center; gap: 12px; color: white;
+            transform: translateX(120%);
+            transition: transform 0.7s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+            will-change: transform; border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+        .track-info.visible { transform: translateX(0); }
+        .track-info.hidden { transform: translateX(120%); }
+        .track-info .cover { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; flex-shrink: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.5); background: #1a1a2e; }
+        .track-details { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .track-title { font-weight: 600; font-size: 1rem; letter-spacing: -0.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .track-artist { font-size: 0.8rem; color: #b0b0c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .play-icon { font-size: 1.4rem; color: #00d4ff; flex-shrink: 0; text-shadow: 0 0 20px rgba(0, 212, 255, 0.5); animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <div id="widget-container">
+        <div class="track-info" id="trackInfo">
+            <img class="cover" id="cover" src="" alt="">
+            <div class="track-details">
+                <div class="track-title" id="title"></div>
+                <div class="track-artist" id="artist"></div>
+            </div>
+            <i class="fas fa-play play-icon"></i>
+        </div>
+    </div>
+
+    <script>
+        const widgetToken = "{{ token }}";
+        const widgetUrl = "/api/widget/" + widgetToken;
+        const trackInfo = document.getElementById('trackInfo');
+        const titleEl = document.getElementById('title');
+        const artistEl = document.getElementById('artist');
+        const coverEl = document.getElementById('cover');
+        let currentTrackId = null;
+        let hideTimeout = null;
+
+        function showWidget(track) {
+            if (hideTimeout) clearTimeout(hideTimeout);
+            titleEl.textContent = track.title;
+            artistEl.textContent = track.artist;
+            coverEl.src = track.cover_url;
+            trackInfo.classList.remove('visible', 'hidden');
+            void trackInfo.offsetWidth;
+            trackInfo.classList.add('visible');
+            currentTrackId = track.track_url;
+            hideTimeout = setTimeout(() => {
+                trackInfo.classList.remove('visible');
+                trackInfo.classList.add('hidden');
+            }, 5000);
+        }
+
+        function hideWidget() {
+            if (hideTimeout) clearTimeout(hideTimeout);
+            trackInfo.classList.remove('visible');
+            trackInfo.classList.add('hidden');
+            currentTrackId = null;
+        }
+
+        async function updateWidget() {
+            try {
+                const resp = await fetch(widgetUrl);
+                const data = await resp.json();
+                if (data.playing) {
+                    const track = data.track;
+                    if (track.track_url !== currentTrackId) showWidget(track);
+                } else hideWidget();
+            } catch (e) {}
+        }
+
+        updateWidget();
+        setInterval(updateWidget, 5000);
+    </script>
+</body>
+</html>

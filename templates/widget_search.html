@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MusicForge Search Widget</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; background: #0b0b14; color: #f0f0f5; font-family: 'Inter', sans-serif; font-size: 13px; overflow: hidden; }
+        .widget { display: flex; flex-direction: column; height: 100%; }
+        .top { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.2); }
+        .top input { flex: 1; padding: 7px 12px; background: #12121f; border: 1px solid rgba(255,255,255,0.08); color: #fff; border-radius: 8px; outline: none; font-size: 13px; min-width: 0; }
+        .top input:focus { border-color: #00d4ff; }
+        .tab { padding: 6px 12px; background: transparent; border: 1px solid rgba(255,255,255,0.08); color: #aaa; border-radius: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+        .tab.active { background: #00d4ff; color: #0b0b14; border-color: #00d4ff; font-weight: 600; }
+        .subbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 11px; color: #888; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.15); }
+        .subbar .source { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .subbar .source strong { color: #00d4ff; font-weight: 600; }
+        .subbar button { background: #12121f; border: 1px solid rgba(255,255,255,0.08); color: #ccc; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 11px; white-space: nowrap; }
+        .subbar button:hover { border-color: #00d4ff; color: #00d4ff; }
+        .subbar button:disabled { opacity: 0.35; cursor: not-allowed; }
+        .subbar button.play-all { background: #00d4ff; color: #0b0b14; border: none; font-weight: 600; }
+        .subbar button.play-all:hover:not(:disabled) { background: #66e0ff; color: #0b0b14; }
+        .subbar button.play-all:disabled { background: #1a3a44; color: #4a7a86; }
+        .results { flex: 1; overflow-y: auto; padding: 6px; }
+        .results::-webkit-scrollbar { width: 6px; }
+        .results::-webkit-scrollbar-thumb { background: #00d4ff55; border-radius: 3px; }
+        .result { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; transition: background 0.15s; }
+        .result:hover { background: rgba(0,212,255,0.08); }
+        .result.active { background: rgba(0,212,255,0.15); border-left: 3px solid #00d4ff; padding-left: 5px; }
+        .result img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex-shrink: 0; background: #1a1a2e; }
+        .result-info { flex: 1; min-width: 0; }
+        .result-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+        .result-artist { font-size: 11px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .result-icon { color: #00d4ff; font-size: 12px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+        .result:hover .result-icon { opacity: 0.7; }
+        .empty { padding: 24px; text-align: center; color: #555; font-size: 12px; }
+        .player { border-top: 1px solid rgba(255,255,255,0.06); padding: 8px; display: flex; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.3); }
+        .now-playing { display: flex; align-items: center; gap: 8px; }
+        .now-playing img { width: 36px; height: 36px; border-radius: 4px; object-fit: cover; flex-shrink: 0; background: #1a1a2e; }
+        .now-playing .info { flex: 1; min-width: 0; }
+        .np-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+        .np-artist { font-size: 10px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .controls { display: flex; gap: 6px; align-items: center; }
+        .ctrl-btn { background: #12121f; border: 1px solid rgba(255,255,255,0.08); color: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; min-width: 32px; }
+        .ctrl-btn:hover:not(:disabled) { border-color: #00d4ff; color: #00d4ff; }
+        .ctrl-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .ctrl-btn.main { background: #00d4ff; color: #0b0b14; border: none; padding: 4px 16px; font-size: 14px; }
+        .ctrl-btn.main:hover { background: #66e0ff; color: #0b0b14; }
+        .time { font-size: 11px; color: #888; margin-left: auto; white-space: nowrap; }
+    </style>
+</head>
+<body>
+<div class="widget">
+    <div class="top">
+        <input type="text" id="searchInput" placeholder="Поиск треков или плейлистов...">
+        <button class="tab active" data-tab="tracks">Треки</button>
+        <button class="tab" data-tab="playlists">Плейлисты</button>
+    </div>
+    <div class="subbar">
+        <span class="source" id="queueSource">Очередь пуста</span>
+        <button class="play-all" id="playAllBtn" disabled>▶ Все результаты</button>
+    </div>
+    <div class="results" id="results">
+        <div class="empty">Введите запрос</div>
+    </div>
+    <div class="player">
+        <div class="now-playing">
+            <img id="npCover" src="" alt="">
+            <div class="info">
+                <div class="np-title" id="npTitle">Ничего не играет</div>
+                <div class="np-artist" id="npArtist"></div>
+            </div>
+        </div>
+        <div class="controls">
+            <button class="ctrl-btn" id="prev" title="Предыдущий" disabled><i class="fas fa-step-backward"></i></button>
+            <button class="ctrl-btn main" id="playPause" title="Играть / пауза"><i class="fas fa-play"></i></button>
+            <button class="ctrl-btn" id="next" title="Следующий" disabled><i class="fas fa-step-forward"></i></button>
+            <span class="time" id="time">0:00 / 0:00</span>
+        </div>
+    </div>
+</div>
+<audio id="audio"></audio>
+<script>
+const TOKEN = "{{ token }}";
+let queue = [];
+let queueIndex = -1;
+let queueSource = '';
+let currentTab = 'tracks';
+let searchTimeout = null;
+let currentResults = [];
+let lastReportedTrackId = null;
+let stopTimer = null;
+
+const audio = document.getElementById('audio');
+const searchInput = document.getElementById('searchInput');
+const resultsEl = document.getElementById('results');
+const queueSourceEl = document.getElementById('queueSource');
+const playAllBtn = document.getElementById('playAllBtn');
+const npCover = document.getElementById('npCover');
+const npTitle = document.getElementById('npTitle');
+const npArtist = document.getElementById('npArtist');
+const playPauseBtn = document.getElementById('playPause');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const timeEl = document.getElementById('time');
+
+function formatTime(s) {
+    if (!isFinite(s) || isNaN(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' + sec : sec);
+}
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+function updateQueueUI() {
+    const multi = queue.length > 1;
+    prevBtn.disabled = !multi;
+    nextBtn.disabled = !multi;
+    if (!queue.length) queueSourceEl.innerHTML = 'Очередь пуста';
+    else queueSourceEl.innerHTML = '<strong>' + escapeHtml(queueSource) + '</strong> · ' + (queueIndex + 1) + '/' + queue.length;
+    playAllBtn.disabled = !(currentTab === 'tracks' && currentResults.length > 0);
+}
+function showNowPlaying(track) {
+    if (!track) {
+        npCover.removeAttribute('src');
+        npTitle.textContent = 'Ничего не играет';
+        npArtist.textContent = '';
+        return;
+    }
+    npCover.src = track.cover_url || '';
+    npTitle.textContent = track.title || '';
+    npArtist.textContent = track.artist || '';
+}
+function reportListen(track) {
+    if (!track || !track.track_dir_id) return;
+    lastReportedTrackId = track.track_dir_id;
+    fetch('/api/widget/' + TOKEN + '/listen/' + track.track_dir_id, {method: 'POST'}).catch(() => {});
+}
+function reportStop() {
+    if (!lastReportedTrackId) return;
+    lastReportedTrackId = null;
+    fetch('/api/widget/' + TOKEN + '/stop', {method: 'POST'}).catch(() => {});
+}
+function scheduleStop() { if (stopTimer) clearTimeout(stopTimer); stopTimer = setTimeout(reportStop, 1200); }
+function cancelStop() { if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; } }
+function markActive() {
+    const rows = resultsEl.querySelectorAll('.result');
+    rows.forEach(r => r.classList.remove('active'));
+    if (queueIndex < 0 || queueIndex >= queue.length) return;
+    const currentId = queue[queueIndex].track_dir_id;
+    rows.forEach(r => { if (r.dataset.trackId === currentId) r.classList.add('active'); });
+}
+function playIndex(idx) {
+    if (idx < 0 || idx >= queue.length) return;
+    queueIndex = idx;
+    const t = queue[idx];
+    audio.src = t.audio_url;
+    audio.play().catch(() => {});
+    showNowPlaying(t);
+    updateQueueUI();
+    markActive();
+}
+function setQueue(items, source, startIndex) {
+    if (!items || !items.length) return;
+    queue = items.slice();
+    queueSource = source;
+    playIndex(startIndex || 0);
+}
+function togglePlay() {
+    if (!audio.src) { if (queue.length > 0) playIndex(0); return; }
+    if (audio.paused) audio.play().catch(() => {});
+    else audio.pause();
+}
+function nextTrack() { if (queue.length <= 1) return; playIndex((queueIndex + 1) % queue.length); }
+function prevTrack() { if (queue.length <= 1) return; playIndex((queueIndex - 1 + queue.length) % queue.length); }
+
+function renderResults(items) {
+    currentResults = items;
+    if (!items.length) {
+        resultsEl.innerHTML = '<div class="empty">Ничего не найдено</div>';
+        updateQueueUI();
+        return;
+    }
+    resultsEl.innerHTML = '';
+    items.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'result';
+        if (currentTab === 'tracks') {
+            row.dataset.trackId = item.track_dir_id;
+            row.innerHTML =
+                '<img src="' + (item.cover_url || '') + '" onerror="this.src=\'/static/default_cover.webp\'">' +
+                '<div class="result-info">' +
+                    '<div class="result-title">' + escapeHtml(item.title) + '</div>' +
+                    '<div class="result-artist">' + escapeHtml(item.artist) + (item.is_ai ? ' · AI' : '') + '</div>' +
+                '</div>' +
+                '<i class="fas fa-play result-icon"></i>';
+            row.addEventListener('click', () => setQueue([item], '🎵 ' + item.title));
+        } else {
+            row.innerHTML =
+                '<i class="fas fa-list result-icon" style="opacity:0.5;"></i>' +
+                '<div class="result-info">' +
+                    '<div class="result-title">' + escapeHtml(item.name) + '</div>' +
+                    '<div class="result-artist">' + escapeHtml(item.owner) + ' · ' + item.track_count + ' треков</div>' +
+                '</div>' +
+                '<i class="fas fa-play result-icon"></i>';
+            row.addEventListener('click', async () => {
+                const resp = await fetch('/api/widget/' + TOKEN + '/playlist/' + item.playlist_dir_id);
+                const data = await resp.json();
+                if (data.tracks && data.tracks.length) setQueue(data.tracks, '📁 ' + data.name);
+            });
+        }
+        resultsEl.appendChild(row);
+    });
+    markActive();
+    updateQueueUI();
+}
+async function doSearch() {
+    const q = searchInput.value.trim();
+    if (!q) { resultsEl.innerHTML = '<div class="empty">Введите запрос</div>'; currentResults = []; updateQueueUI(); return; }
+    try {
+        const resp = await fetch('/api/widget/' + TOKEN + '/search?q=' + encodeURIComponent(q) + '&type=' + currentTab);
+        const data = await resp.json();
+        renderResults(data.results || []);
+    } catch (e) {
+        resultsEl.innerHTML = '<div class="empty">Ошибка поиска</div>';
+        currentResults = [];
+        updateQueueUI();
+    }
+}
+searchInput.addEventListener('input', () => { clearTimeout(searchTimeout); searchTimeout = setTimeout(doSearch, 300); });
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentTab = tab.dataset.tab;
+        doSearch();
+    });
+});
+playAllBtn.addEventListener('click', () => {
+    if (currentTab !== 'tracks' || !currentResults.length) return;
+    setQueue(currentResults, '🔍 ' + searchInput.value.trim());
+});
+playPauseBtn.addEventListener('click', togglePlay);
+prevBtn.addEventListener('click', prevTrack);
+nextBtn.addEventListener('click', nextTrack);
+audio.addEventListener('play', () => {
+    cancelStop();
+    playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+    if (queueIndex >= 0 && queue[queueIndex]) {
+        if (lastReportedTrackId !== queue[queueIndex].track_dir_id) reportListen(queue[queueIndex]);
+    }
+});
+audio.addEventListener('pause', () => {
+    playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
+    if (!audio.ended) scheduleStop();
+});
+audio.addEventListener('ended', () => {
+    if (queue.length > 1) nextTrack();
+    else { playPauseBtn.innerHTML = '<i class="fas fa-play"></i>'; audio.currentTime = 0; scheduleStop(); }
+});
+audio.addEventListener('timeupdate', () => { timeEl.textContent = formatTime(audio.currentTime) + ' / ' + formatTime(audio.duration); });
+window.addEventListener('beforeunload', () => { if (lastReportedTrackId) navigator.sendBeacon('/api/widget/' + TOKEN + '/stop'); });
+updateQueueUI();
+</script>
+</body>
+</html>
