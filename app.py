@@ -25,6 +25,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sock import Sock
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import or_, desc, func, and_, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
@@ -85,6 +86,8 @@ app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
 app.config['REMEMBER_COOKIE_SECURE'] = os.environ.get('COOKIE_SECURE', '0') == '1'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 app.config['WTF_CSRF_TIME_LIMIT'] = None
+app.config['PREFERRED_URL_SCHEME'] = 'https'
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 BASE_USER_DIR = os.path.join('static', 'users')
 os.makedirs(BASE_USER_DIR, exist_ok=True)
@@ -2022,12 +2025,63 @@ def admin_recompute():
 def settings():
     if request.method == 'POST':
         action = request.form.get('action')
+        
+        if action == 'change_username':
+            new_login = request.form.get('new_login', '').strip()
+            if not new_login:
+                flash('Логин не может быть пустым', 'danger')
+            elif len(new_login) < 3:
+                flash('Логин должен быть не менее 3 символов', 'danger')
+            elif new_login == current_user.login:
+                flash('Это ваш текущий логин', 'info')
+            elif current_user.last_username_change and (utcnow() - current_user.last_username_change) < timedelta(days=7):
+                days_left = 7 - (utcnow() - current_user.last_username_change).days
+                flash(f'Вы можете менять логин раз в неделю. Осталось дней: {days_left}', 'danger')
+            elif User.query.filter_by(login=new_login).first():
+                flash('Этот логин уже занят', 'danger')
+            else:
+                current_user.login = new_login
+                current_user.last_username_change = utcnow()
+                commit_with_retry()
+                flash('Логин успешно изменён', 'success')
+            return redirect(url_for('settings'))
+
+        if action == 'set_password':
+            new = request.form.get('new_password', '')
+            cf = request.form.get('confirm_password', '')
+            if current_user.has_custom_password:
+                flash('У вас уже установлен пароль', 'info')
+            elif len(new) < 8:
+                flash('Минимум 8 символов', 'danger')
+            elif new != cf:
+                flash('Пароли не совпадают', 'danger')
+            else:
+                current_user.password_hash = generate_password_hash(new)
+                current_user.has_custom_password = True
+                commit_with_retry()
+                flash('Пароль успешно установлен', 'success')
+            return redirect(url_for('settings'))
+
+        if action == 'unlink_oauth':
+            provider = request.form.get('provider')
+            linked = OAuthAccount.query.filter_by(user_id=current_user.id).all()
+            if len(linked) <= 1 and not current_user.has_custom_password:
+                flash('Вы не можете отвязать последний способ входа, так как у вас нет пароля', 'danger')
+                return redirect(url_for('settings'))
+            acc = OAuthAccount.query.filter_by(user_id=current_user.id, provider=provider).first()
+            if acc:
+                db.session.delete(acc)
+                commit_with_retry()
+                flash(f'Аккаунт {provider} успешно отвязан', 'success')
+            return redirect(url_for('settings'))
+
         if action == 'regenerate_widget_token':
             current_user.widget_token = _make_widget_token()
             current_user.widget_token_created_at = utcnow()
             commit_with_retry()
             flash('Токен виджетов обновлён', 'success')
             return redirect(url_for('settings'))
+            
         if action == 'regenerate_api_token':
             revoke_user_tokens(current_user)
             raw = issue_access_token(current_user)
@@ -2036,6 +2090,7 @@ def settings():
             flask_session['one_time_refresh'] = rraw
             flash('Токен обновлён. Скопируйте его — он больше не будет показан.', 'success')
             return redirect(url_for('settings'))
+            
         if action == 'password':
             cur = request.form.get('current_password', '')
             new = request.form.get('new_password', '')
@@ -2048,6 +2103,7 @@ def settings():
                 flash('Пароли не совпадают', 'danger')
             else:
                 current_user.password_hash = generate_password_hash(new)
+                current_user.has_custom_password = True
                 current_user.api_token_hash = None
                 current_user.api_token_expires_at = None
                 RefreshToken.query.filter_by(user_id=current_user.id).update({'revoked': True})
@@ -2055,6 +2111,7 @@ def settings():
                 logout_user()
                 flash('Пароль изменён. Войдите заново.', 'success')
                 return redirect(url_for('login'))
+                
         elif action == 'profile':
             current_user.display_name = request.form.get('display_name', current_user.display_name)
             current_user.bio = request.form.get('bio', '')
@@ -2080,10 +2137,21 @@ def settings():
             commit_with_retry()
             flash('Профиль обновлён', 'success')
         return redirect(url_for('settings'))
+        
     one_time = flask_session.pop('one_time_token', None)
     one_time_r = flask_session.pop('one_time_refresh', None)
+    linked_providers = [acc.provider for acc in OAuthAccount.query.filter_by(user_id=current_user.id).all()]
+    
+    days_until_username_change = 0
+    if current_user.last_username_change:
+        delta = utcnow() - current_user.last_username_change
+        if delta.days < 7:
+            days_until_username_change = 7 - delta.days
+            
     return render_template('settings.html', one_time_token=one_time,
-                           one_time_refresh=one_time_r)
+                           one_time_refresh=one_time_r,
+                           linked_providers=linked_providers,
+                           days_until_username_change=days_until_username_change)
 
 
 api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
@@ -2929,6 +2997,12 @@ def oauth_start(provider):
     state = secrets.token_urlsafe(24)
     flask_session['oauth_state'] = state
     flask_session['oauth_provider'] = provider
+    
+    if request.args.get('link') == '1' and current_user.is_authenticated:
+        flask_session['oauth_link'] = True
+    else:
+        flask_session['oauth_link'] = False
+
     from urllib.parse import urlencode
     params = {
         'client_id': cfg['client_id'],
@@ -2950,13 +3024,17 @@ def oauth_callback(provider):
         return redirect(url_for('login'))
     state = request.args.get('state', '')
     expected = flask_session.pop('oauth_state', None)
+    is_linking = flask_session.pop('oauth_link', False)
+    
     if not expected or state != expected:
         flash('Неверный state OAuth', 'danger')
-        return redirect(url_for('login'))
+        return redirect(url_for('settings') if is_linking else url_for('login'))
+        
     code = request.args.get('code', '')
     if not code:
         flash('OAuth отказано', 'danger')
-        return redirect(url_for('login'))
+        return redirect(url_for('settings') if is_linking else url_for('login'))
+        
     cfg = OAUTH_PROVIDERS[provider]
     headers = {'Accept': 'application/json'}
     try:
@@ -2978,7 +3056,8 @@ def oauth_callback(provider):
         info = r.json()
     except Exception as e:
         flash(f'OAuth ошибка: {e}', 'danger')
-        return redirect(url_for('login'))
+        return redirect(url_for('settings') if is_linking else url_for('login'))
+        
     if provider == 'google':
         pid = str(info.get('id') or info.get('sub') or '')
         email = (info.get('email') or '').strip()
@@ -2997,9 +3076,29 @@ def oauth_callback(provider):
                         break
             except Exception:
                 pass
+                
     if not pid or not email:
         flash('OAuth: не удалось получить email', 'danger')
-        return redirect(url_for('login'))
+        return redirect(url_for('settings') if is_linking else url_for('login'))
+
+    if is_linking:
+        if not current_user.is_authenticated:
+            flash('Сессия истекла, попробуйте снова', 'danger')
+            return redirect(url_for('login'))
+            
+        existing = OAuthAccount.query.filter_by(provider=provider, provider_user_id=pid).first()
+        if existing:
+            if existing.user_id == current_user.id:
+                flash('Этот аккаунт уже привязан к вашему профилю', 'info')
+            else:
+                flash('Этот аккаунт уже привязан к другому пользователю', 'danger')
+            return redirect(url_for('settings'))
+            
+        db.session.add(OAuthAccount(user_id=current_user.id, provider=provider, provider_user_id=pid))
+        commit_with_retry()
+        flash(f'Аккаунт {provider} успешно привязан', 'success')
+        return redirect(url_for('settings'))
+
     acct = OAuthAccount.query.filter_by(provider=provider, provider_user_id=pid).first()
     if acct:
         u = db.session.get(User, acct.user_id)
@@ -3014,15 +3113,17 @@ def oauth_callback(provider):
                 login_candidate = f'{base}{n}'
             u = User(user_dir_id=generate_user_dir_id(), login=login_candidate,
                      email=email, password_hash=generate_password_hash(secrets.token_hex(16)),
-                     display_name=name or login_candidate)
+                     display_name=name or login_candidate, has_custom_password=False)
             db.session.add(u)
             commit_with_retry()
             os.makedirs(get_user_dir(u), exist_ok=True)
         db.session.add(OAuthAccount(user_id=u.id, provider=provider, provider_user_id=pid))
         commit_with_retry()
+        
     if not u:
         flash('OAuth: пользователь не найден', 'danger')
         return redirect(url_for('login'))
+        
     login_user(u)
     return redirect(url_for('index'))
 
