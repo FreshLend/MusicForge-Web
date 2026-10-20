@@ -17,6 +17,7 @@ class User(UserMixin, db.Model):
     login = db.Column(db.String(80), unique=True, nullable=False, index=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(256), nullable=False)
+    has_custom_password = db.Column(db.Boolean, default=True, nullable=False)
     display_name = db.Column(db.String(120), nullable=False)
     bio = db.Column(db.Text, default='')
     current_track_id = db.Column(db.Integer, db.ForeignKey('track.id', ondelete='SET NULL'), nullable=True)
@@ -26,6 +27,7 @@ class User(UserMixin, db.Model):
     widget_token_created_at = db.Column(db.DateTime, nullable=True)
     api_token_hash = db.Column(db.String(128), unique=True, nullable=True, index=True)
     api_token_expires_at = db.Column(db.DateTime, nullable=True)
+    last_username_change = db.Column(db.DateTime, nullable=True)
 
     playlists = db.relationship('Playlist', backref='owner', lazy='dynamic',
                                 cascade='all, delete-orphan')
@@ -33,6 +35,7 @@ class User(UserMixin, db.Model):
                              foreign_keys='Track.uploader_id',
                              cascade='all, delete-orphan')
     current_track = db.relationship('Track', foreign_keys=[current_track_id], post_update=True)
+    oauth_accounts = db.relationship('OAuthAccount', backref='user', lazy='dynamic', cascade='all, delete-orphan')
 
     def set_password(self, password):
         from werkzeug.security import generate_password_hash
