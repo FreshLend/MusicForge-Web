@@ -11,6 +11,7 @@ import json
 import threading
 import requests
 import logging
+import re
 from datetime import timedelta
 from functools import wraps
 from urllib.parse import urlparse
@@ -37,7 +38,6 @@ from models import (db, utcnow, User, Track, Playlist, PlaylistTrack, Favorite,
                     TrackSimilarity, UserSimilarity, RefreshToken,
                     OAuthAccount, Webhook)
 
-
 Image.MAX_IMAGE_PIXELS = 40_000_000
 MAX_PARALLEL_UPLOADS = 4
 ACCESS_TOKEN_TTL = timedelta(days=int(os.environ.get('ACCESS_TOKEN_TTL_DAYS', '30')))
@@ -47,6 +47,14 @@ ENFORCE_TOKEN_EXPIRY = os.environ.get('ENFORCE_TOKEN_EXPIRY', '1') == '1'
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger('musicforge')
 
+_desktop_codes = {}
+_codes_lock = threading.Lock()
+
+def generate_desktop_code(user_id):
+    code = secrets.token_urlsafe(32)
+    with _codes_lock:
+        _desktop_codes[code] = (user_id, time.time())
+    return code
 
 def _load_or_create_secret():
     env = os.environ.get('SECRET_KEY')
@@ -67,8 +75,11 @@ def _load_or_create_secret():
         pass
     return key
 
-
 app = Flask(__name__)
+import mimetypes
+mimetypes.add_type('image/webp', '.webp')
+mimetypes.add_type('video/webm', '.webm')
+
 app.config['SECRET_KEY'] = _load_or_create_secret()
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI', 'sqlite:///musicforge.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -93,7 +104,6 @@ BASE_USER_DIR = os.path.join('static', 'users')
 os.makedirs(BASE_USER_DIR, exist_ok=True)
 
 db.init_app(app)
-
 csrf = CSRFProtect(app)
 
 try:
@@ -109,7 +119,6 @@ except Exception as e:
     log.warning(f'Rate limiter disabled: {e}')
     limiter = None
 
-
 def _rl(limit_str):
     def deco(f):
         if limiter is None:
@@ -117,14 +126,12 @@ def _rl(limit_str):
         return limiter.limit(limit_str)(f)
     return deco
 
-
 sock = Sock(app)
 
 ALLOWED_ORIGINS = {o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '').split(',') if o.strip()}
 WIDGET_TOKEN_TTL_DAYS = int(os.environ.get('WIDGET_TOKEN_TTL_DAYS', '0'))
 
 OAUTH_PROVIDERS = {}
-
 
 def _register_oauth():
     if os.environ.get('GOOGLE_CLIENT_ID') and os.environ.get('GOOGLE_CLIENT_SECRET'):
@@ -148,11 +155,9 @@ def _register_oauth():
             'accept_json': True,
         }
 
-
 _register_oauth()
 
 upload_semaphore = threading.Semaphore(MAX_PARALLEL_UPLOADS)
-
 
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
@@ -165,7 +170,6 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
         cur.close()
     except Exception:
         pass
-
 
 def commit_with_retry(max_attempts=6, base_delay=0.3):
     for attempt in range(max_attempts):
@@ -181,7 +185,6 @@ def commit_with_retry(max_attempts=6, base_delay=0.3):
             raise
     return False
 
-
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
@@ -189,14 +192,11 @@ login_manager.login_view = 'login'
 ALLOWED_AUDIO_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a'}
 ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'}
 
-
 def allowed_audio_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_AUDIO_EXTENSIONS
 
-
 def is_video_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_VIDEO_EXTENSIONS
-
 
 def sniff_audio(path):
     try:
@@ -214,18 +214,14 @@ def sniff_audio(path):
         return 'm4a'
     return None
 
-
 def _token_hash(raw):
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
-
 
 def _make_token():
     return secrets.token_urlsafe(48)
 
-
 def _make_widget_token():
     return secrets.token_urlsafe(40)
-
 
 def issue_access_token(user):
     raw = _make_token()
@@ -233,7 +229,6 @@ def issue_access_token(user):
     user.api_token_expires_at = utcnow() + ACCESS_TOKEN_TTL if ENFORCE_TOKEN_EXPIRY else None
     commit_with_retry()
     return raw
-
 
 def issue_refresh_token(user):
     raw = _make_token()
@@ -246,13 +241,11 @@ def issue_refresh_token(user):
     commit_with_retry()
     return raw
 
-
 def revoke_user_tokens(user):
     user.api_token_hash = None
     user.api_token_expires_at = None
     RefreshToken.query.filter_by(user_id=user.id).update({'revoked': True})
     commit_with_retry()
-
 
 def find_user_by_token(raw):
     if not raw:
@@ -264,7 +257,6 @@ def find_user_by_token(raw):
     if ENFORCE_TOKEN_EXPIRY and user.api_token_expires_at and user.api_token_expires_at < utcnow():
         return None
     return user
-
 
 def ensure_widget_token(user):
     needs = not user.widget_token
@@ -280,18 +272,14 @@ def ensure_widget_token(user):
         commit_with_retry()
     return user.widget_token
 
-
 def generate_user_dir_id():
     return uuid.uuid4().hex
-
 
 def generate_track_dir_id():
     return uuid.uuid4().hex[:16]
 
-
 def generate_playlist_dir_id():
     return uuid.uuid4().hex[:16]
-
 
 def convert_to_webp(input_path, output_path, size=(512, 512)):
     try:
@@ -302,27 +290,21 @@ def convert_to_webp(input_path, output_path, size=(512, 512)):
     except Exception as e:
         raise ValueError(f'Не удалось обработать изображение: {e}')
 
-
 def get_user_dir(user):
     return os.path.join(BASE_USER_DIR, user.user_dir_id)
-
 
 def get_track_dir(track):
     user = db.session.get(User, track.uploader_id)
     return os.path.join(get_user_dir(user), 'music', track.track_dir_id)
 
-
 def get_avatar_path(user):
     return os.path.join(get_user_dir(user), f'{user.user_dir_id}.webp')
-
 
 def get_cover_path(track):
     return os.path.join(get_track_dir(track), f'{track.track_dir_id}.webp')
 
-
 def get_cover_video_path(track):
     return os.path.join(get_track_dir(track), f'{track.track_dir_id}.webm')
-
 
 def has_cover_video(track):
     try:
@@ -330,16 +312,13 @@ def has_cover_video(track):
     except Exception:
         return False
 
-
 def get_audio_path(track):
     return os.path.join(get_track_dir(track), f'{track.track_dir_id}.{track.audio_ext}')
-
 
 def get_lyrics_path(track):
     if track.lyrics_filename:
         return os.path.join(get_track_dir(track), track.lyrics_filename)
     return None
-
 
 def get_lyrics_content(track):
     path = get_lyrics_path(track)
@@ -351,7 +330,6 @@ def get_lyrics_content(track):
             return None
     return None
 
-
 def safe_remove(path):
     if not path:
         return
@@ -360,7 +338,6 @@ def safe_remove(path):
             os.remove(path)
     except (PermissionError, OSError):
         pass
-
 
 def safe_rmtree(path):
     if not path:
@@ -371,14 +348,12 @@ def safe_rmtree(path):
     except (PermissionError, OSError):
         pass
 
-
 def safe_replace(src, dst):
     try:
         os.replace(src, dst)
         return True
     except (PermissionError, OSError):
         return False
-
 
 def safe_convert_to_webp(input_file, output_path, size=(512, 512)):
     tmp = output_path + '.tmp'
@@ -391,7 +366,6 @@ def safe_convert_to_webp(input_file, output_path, size=(512, 512)):
         safe_remove(tmp)
         raise RuntimeError('Не удалось заменить файл. Возможно, он воспроизводится.')
 
-
 def save_lyrics_file(track, content):
     track_dir = get_track_dir(track)
     os.makedirs(track_dir, exist_ok=True)
@@ -402,13 +376,11 @@ def save_lyrics_file(track, content):
     track.lyrics_filename = filename
     commit_with_retry()
 
-
 def delete_lyrics_file(track):
     if track.lyrics_filename:
         safe_remove(get_lyrics_path(track))
         track.lyrics_filename = None
         commit_with_retry()
-
 
 def ensure_default_cover(track):
     if has_cover_video(track):
@@ -423,7 +395,6 @@ def ensure_default_cover(track):
                 pass
         else:
             Image.new('RGB', (512, 512), color='#2a2a3a').save(cover_path, 'webp')
-
 
 def _ffprobe_video(input_path):
     cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
@@ -446,7 +417,6 @@ def _ffprobe_video(input_path):
     except Exception:
         duration = 0.0
     return fps, duration
-
 
 def convert_video_to_cover(input_path, track, size=(512, 512), max_fps=30, crf=32, make_poster=True):
     if not shutil.which('ffmpeg'):
@@ -482,14 +452,12 @@ def convert_video_to_cover(input_path, track, size=(512, 512), max_fps=30, crf=3
         raise RuntimeError('Не удалось заменить видеофайл.')
     return poster_path, video_path
 
-
 def format_count(n):
     if n >= 1_000_000:
         return f"{n // 1_000_000}M" if n % 1_000_000 == 0 else f"{n / 1_000_000:.2f}M"
     if n >= 1000:
         return f"{n // 1000}K" if n % 1000 == 0 else f"{n / 1000:.2f}K"
     return str(n)
-
 
 def parse_tags(tags_string):
     if not tags_string:
@@ -502,7 +470,6 @@ def parse_tags(tags_string):
             result.append(name)
     return result
 
-
 def sync_track_tags(track):
     TrackTag.query.filter_by(track_id=track.id).delete()
     for name in parse_tags(track.tags):
@@ -513,7 +480,6 @@ def sync_track_tags(track):
             db.session.flush()
         db.session.add(TrackTag(track_id=track.id, tag_id=tag.id))
     db.session.flush()
-
 
 def download_from_youtube(url, track_dir, track_dir_id):
     if not shutil.which('yt-dlp'):
@@ -567,7 +533,6 @@ def download_from_youtube(url, track_dir, track_dir_id):
         Image.new('RGB', (512, 512), color='#2a2a3a').save(cover_path, 'webp')
     return title, artist
 
-
 def validate_youtube_url(url):
     try:
         p = urlparse(url)
@@ -579,10 +544,8 @@ def validate_youtube_url(url):
     except Exception:
         return False
 
-
 def _canonical_pair(a, b):
     return (a, b) if a < b else (b, a)
-
 
 def compute_user_similarities(min_score=0.05):
     user_items = {}
@@ -619,7 +582,6 @@ def compute_user_similarities(min_score=0.05):
     if rows:
         db.session.bulk_save_objects(rows)
     commit_with_retry()
-
 
 def compute_track_similarities(top_n=30, min_score=1.0):
     pair_scores = {}
@@ -673,7 +635,6 @@ def compute_track_similarities(top_n=30, min_score=1.0):
         db.session.bulk_save_objects(rows)
     commit_with_retry()
 
-
 def recompute_all_similarities():
     try:
         compute_user_similarities()
@@ -686,7 +647,6 @@ def recompute_all_similarities():
         log.error(f"track_sim failed: {e}")
         db.session.rollback()
 
-
 def _popularity_window(days):
     since = utcnow() - timedelta(days=days)
     rows = db.session.query(ListenEvent.track_id, func.count(ListenEvent.id)) \
@@ -694,7 +654,6 @@ def _popularity_window(days):
         .group_by(ListenEvent.track_id) \
         .order_by(desc(func.count(ListenEvent.id))).all()
     return {tid: c for tid, c in rows}
-
 
 def _build_user_profile(user_id):
     tag_w, art_w = {}, {}
@@ -737,7 +696,6 @@ def _build_user_profile(user_id):
     return {'tag_weights': tag_w, 'artist_weights': art_w, 'seen_tracks': seen,
             'liked_ids': liked, 'disliked_ids': disliked}
 
-
 def _user_cf_candidates(user_id, top_neighbors=20):
     sims = UserSimilarity.query.filter(
         or_(UserSimilarity.user_a_id == user_id, UserSimilarity.user_b_id == user_id)
@@ -758,7 +716,6 @@ def _user_cf_candidates(user_id, top_neighbors=20):
         result[tid] = result.get(tid, 0.0) + w.get(uid, 0.0) * min(c, 10) * 0.4
     return result
 
-
 def _item_cf_candidates(liked_ids, top_n=500):
     if not liked_ids:
         return {}
@@ -771,7 +728,6 @@ def _item_cf_candidates(liked_ids, top_n=500):
             .filter(TrackSimilarity.track_b_id.in_(src)).order_by(TrackSimilarity.score.desc()).limit(top_n).all():
         result[a] = result.get(a, 0.0) + s
     return result
-
 
 def get_recommendations(user, limit=16):
     user_id = user.id if (user is not None and getattr(user, 'is_authenticated', False)) else None
@@ -874,7 +830,6 @@ def get_recommendations(user, limit=16):
                 
     return result
 
-
 def get_track_recommendations(track, user=None, limit=6):
     tags = set(parse_tags(track.tags))
     artist = track.artist_name or track.uploader.display_name
@@ -959,7 +914,6 @@ def get_track_recommendations(track, user=None, limit=6):
                 break
     return result
 
-
 def get_user_stats(user):
     tracks = Track.query.filter_by(uploader_id=user.id) \
         .filter((Track.artist_name.is_(None)) | (Track.artist_name == '')).all()
@@ -967,14 +921,11 @@ def get_user_stats(user):
             'total_likes': sum(t.likes_count for t in tracks),
             'total_plays': sum(t.play_count for t in tracks)}
 
-
 def _json_error(code, message, status=400):
     return jsonify(ok=False, error={'code': code, 'message': message}), status
 
-
 def _json_ok(data):
     return jsonify(ok=True, data=data)
-
 
 def _get_api_user():
     auth = request.headers.get('Authorization', '')
@@ -984,7 +935,6 @@ def _get_api_user():
     if token:
         return find_user_by_token(token)
     return None
-
 
 def api_login_required(f):
     @wraps(f)
@@ -996,14 +946,12 @@ def api_login_required(f):
         return f(*a, **kw)
     return deco
 
-
 def api_user_optional(f):
     @wraps(f)
     def deco(*a, **kw):
         g.api_user = _get_api_user()
         return f(*a, **kw)
     return deco
-
 
 def _safe_next(default_endpoint='playlists'):
     ref = request.referrer
@@ -1016,10 +964,8 @@ def _safe_next(default_endpoint='playlists'):
             pass
     return url_for(default_endpoint)
 
-
 def _track_cover_url(track):
     return url_for('static', filename=f'users/{track.uploader.user_dir_id}/music/{track.track_dir_id}/{track.track_dir_id}.webp')
-
 
 def _track_video_url(track):
     try:
@@ -1028,7 +974,6 @@ def _track_video_url(track):
     except Exception:
         pass
     return None
-
 
 def serialize_track(track, include_lyrics=False):
     r = {
@@ -1052,7 +997,6 @@ def serialize_track(track, include_lyrics=False):
         r['lyrics'] = get_lyrics_content(track)
     return r
 
-
 def serialize_playlist(pl, include_tracks=False):
     r = {
         'id': pl.playlist_dir_id,
@@ -1070,7 +1014,6 @@ def serialize_playlist(pl, include_tracks=False):
         r['tracks'] = [serialize_track(t) for t in tracks]
     return r
 
-
 def serialize_user(user, include_stats=False):
     r = {
         'id': user.user_dir_id,
@@ -1085,10 +1028,8 @@ def serialize_user(user, include_stats=False):
         r.update(get_user_stats(user))
     return r
 
-
 _ws_clients = {}
 _ws_lock = threading.Lock()
-
 
 def ws_broadcast_now_playing(user_id, track_id, stopped=False):
     with _ws_lock:
@@ -1107,7 +1048,6 @@ def ws_broadcast_now_playing(user_id, track_id, stopped=False):
             ws.send(payload)
         except Exception:
             pass
-
 
 def _dispatch_webhooks(user_id, event, payload):
     hooks = Webhook.query.filter_by(user_id=user_id, active=True).all()
@@ -1129,12 +1069,10 @@ def _dispatch_webhooks(user_id, event, payload):
     for h in matching:
         threading.Thread(target=send, args=(h,), daemon=True).start()
 
-
 @app.before_request
 def _api_preflight():
     if request.method == 'OPTIONS' and request.path.startswith('/api/'):
         return ('', 204, {})
-
 
 @app.after_request
 def _apply_headers(response):
@@ -1155,7 +1093,6 @@ def _apply_headers(response):
     response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
     return response
 
-
 @app.errorhandler(CSRFError)
 def _csrf_error(e):
     if request.path.startswith('/api/'):
@@ -1163,11 +1100,9 @@ def _csrf_error(e):
     flash('Сессия истекла, попробуйте снова', 'danger')
     return redirect(url_for('index'))
 
-
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
-
 
 @app.context_processor
 def inject_helpers():
@@ -1176,11 +1111,9 @@ def inject_helpers():
     return dict(has_cover_video=has_cover_video, get_cover_video_url=cover_video_url,
                 oauth_providers=list(OAUTH_PROVIDERS.keys()))
 
-
 @app.route('/health')
 def health():
     return jsonify(status='ok', time=utcnow().isoformat())
-
 
 @app.route('/favicon.ico')
 def favicon():
@@ -1188,7 +1121,6 @@ def favicon():
     if os.path.exists(ico):
         return send_file(ico, mimetype='image/x-icon')
     return ('', 204)
-
 
 @app.route('/')
 def index():
@@ -1205,20 +1137,17 @@ def index():
                            popular_tracks=[r[0] for r in popular],
                            recommendations=recommendations)
 
-
 @app.route('/releases')
 def releases():
     page = request.args.get('page', 1, type=int)
     tracks = Track.query.order_by(Track.uploaded_at.desc()).paginate(page=page, per_page=20)
     return render_template('releases.html', tracks=tracks)
 
-
 @app.route('/all_new')
 def all_new():
     tracks = Track.query.filter(Track.uploaded_at >= utcnow() - timedelta(days=7)) \
         .order_by(Track.uploaded_at.desc()).all()
     return render_template('all_new.html', tracks=tracks)
-
 
 @app.route('/all_chart')
 def all_chart():
@@ -1228,11 +1157,9 @@ def all_chart():
         .group_by(Track.id).order_by(desc('cnt')).all()
     return render_template('all_chart.html', tracks=[r[0] for r in rows])
 
-
 @app.route('/app')
 def app_info():
     return render_template('app_info.html')
-
 
 @app.route('/random')
 def random_track():
@@ -1241,7 +1168,6 @@ def random_track():
         flash('Нет треков', 'danger')
         return redirect(url_for('index'))
     return redirect(url_for('track', track_dir_id=t.track_dir_id))
-
 
 @app.route('/search')
 def search():
@@ -1254,7 +1180,6 @@ def search():
             Track.uploader.has(User.display_name.ilike(f'%{q}%'))
         )).all()
     return render_template('search.html', tracks=tracks, query=q)
-
 
 @app.route('/advanced_search')
 def advanced_search():
@@ -1281,7 +1206,6 @@ def advanced_search():
     tracks = q.order_by(Track.uploaded_at.desc()).all()
     return render_template('advanced_search.html', tracks=tracks, request_args=request.args)
 
-
 @app.route('/track/<string:track_dir_id>')
 def track(track_dir_id):
     t = Track.query.filter_by(track_dir_id=track_dir_id).first_or_404()
@@ -1305,7 +1229,6 @@ def track(track_dir_id):
                            track_lyrics=get_lyrics_content(t),
                            has_video=has_cover_video(t))
 
-
 @app.route('/track/<string:track_dir_id>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_track(track_dir_id):
@@ -1317,7 +1240,6 @@ def edit_track(track_dir_id):
         with upload_semaphore:
             return _handle_edit_track(t)
     return render_template('edit_track.html', track=t)
-
 
 def _handle_edit_track(track):
     track.title = request.form.get('title', track.title)
@@ -1375,7 +1297,6 @@ def _handle_edit_track(track):
     flash('Трек обновлён', 'success')
     return redirect(url_for('track', track_dir_id=track.track_dir_id))
 
-
 @app.route('/track/<string:track_dir_id>/delete', methods=['POST'])
 @login_required
 def delete_track(track_dir_id):
@@ -1389,7 +1310,6 @@ def delete_track(track_dir_id):
     flash('Трек удалён', 'success')
     return redirect(url_for('index'))
 
-
 @app.route('/api/track/<string:track_dir_id>/status')
 @login_required
 def track_status(track_dir_id):
@@ -1400,7 +1320,6 @@ def track_status(track_dir_id):
     return jsonify(is_favorite=is_fav, playlist_ids=pl_ids,
                    user_rating=r.value if r else 0,
                    likes=t.likes_count, dislikes=t.dislikes_count, plays=t.play_count)
-
 
 @app.route('/api/rate/<string:track_dir_id>', methods=['POST'])
 @login_required
@@ -1444,7 +1363,6 @@ def rate_track(track_dir_id):
         db.session.rollback()
         return jsonify(error='Retry'), 503
 
-
 @app.route('/api/listen/<string:track_dir_id>', methods=['POST'])
 @_rl('120/minute')
 def api_listen(track_dir_id):
@@ -1482,7 +1400,6 @@ def api_listen(track_dir_id):
         return jsonify(status='error'), 500
     return jsonify(status='ok')
 
-
 @app.route('/widgets')
 @login_required
 def widgets():
@@ -1491,12 +1408,10 @@ def widgets():
                            now_playing_url=url_for('widget_now_playing', token=current_user.widget_token, _external=True),
                            search_url=url_for('widget_search', token=current_user.widget_token, _external=True))
 
-
 @app.route('/widget/<string:token>')
 def widget_now_playing(token):
     User.query.filter_by(widget_token=token).first_or_404()
     return render_template('widget.html', token=token)
-
 
 @app.route('/api/widget/<string:token>')
 def api_widget_now_playing(token):
@@ -1518,12 +1433,10 @@ def api_widget_now_playing(token):
         'track_url': url_for('track', track_dir_id=track.track_dir_id),
     })
 
-
 @app.route('/widget/search/<string:token>')
 def widget_search(token):
     User.query.filter_by(widget_token=token).first_or_404()
     return render_template('widget_search.html', token=token)
-
 
 @app.route('/api/widget/<string:token>/search')
 def api_widget_search(token):
@@ -1547,7 +1460,6 @@ def api_widget_search(token):
         'audio_url': url_for('static', filename=f'users/{t.uploader.user_dir_id}/music/{t.track_dir_id}/{t.track_dir_id}.{t.audio_ext}')
     } for t in rows])
 
-
 @app.route('/api/widget/<string:token>/playlist/<string:playlist_dir_id>')
 def api_widget_playlist_tracks(token, playlist_dir_id):
     u = User.query.filter_by(widget_token=token).first_or_404()
@@ -1562,7 +1474,6 @@ def api_widget_playlist_tracks(token, playlist_dir_id):
         'cover_url': _track_cover_url(t),
         'audio_url': url_for('static', filename=f'users/{t.uploader.user_dir_id}/music/{t.track_dir_id}/{t.track_dir_id}.{t.audio_ext}')
     } for t in rows])
-
 
 @app.route('/api/widget/<string:token>/listen/<string:track_dir_id>', methods=['POST'])
 @_rl('120/minute')
@@ -1594,7 +1505,6 @@ def api_widget_listen(token, track_dir_id):
         return jsonify(status='error'), 500
     return jsonify(status='ok')
 
-
 @app.route('/api/widget/<string:token>/stop', methods=['POST'])
 def api_widget_stop(token):
     u = User.query.filter_by(widget_token=token).first_or_404()
@@ -1603,7 +1513,6 @@ def api_widget_stop(token):
     commit_with_retry()
     ws_broadcast_now_playing(u.id, None, stopped=True)
     return jsonify(status='ok')
-
 
 @app.route('/login', methods=['GET', 'POST'])
 @_rl('30/minute')
@@ -1614,10 +1523,14 @@ def login():
         u = User.query.filter(or_(User.login == ident, User.email == ident)).first()
         if u and check_password_hash(u.password_hash, pw):
             login_user(u)
+            desktop_redirect = flask_session.pop('desktop_redirect', None)
+            desktop_state = flask_session.pop('desktop_state', None)
+            if desktop_redirect and re.match(r'^http://127\.0\.0\.1:\d+/callback$', desktop_redirect):
+                code = generate_desktop_code(u.id)
+                return redirect(f"{desktop_redirect}?code={code}&state={desktop_state}")
             return redirect(url_for('index'))
         flash('Неверный логин/email или пароль', 'danger')
     return render_template('login.html')
-
 
 @app.route('/register', methods=['GET', 'POST'])
 @_rl('10/hour')
@@ -1648,16 +1561,19 @@ def register():
         commit_with_retry()
         os.makedirs(get_user_dir(u), exist_ok=True)
         login_user(u)
+        desktop_redirect = flask_session.pop('desktop_redirect', None)
+        desktop_state = flask_session.pop('desktop_state', None)
+        if desktop_redirect and re.match(r'^http://127\.0\.0\.1:\d+/callback$', desktop_redirect):
+            code = generate_desktop_code(u.id)
+            return redirect(f"{desktop_redirect}?code={code}&state={desktop_state}")
         return redirect(url_for('index'))
     return render_template('register.html')
-
 
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('index'))
-
 
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
@@ -1667,7 +1583,6 @@ def upload():
         with upload_semaphore:
             return _handle_upload()
     return render_template('upload.html')
-
 
 def _handle_upload():
     upload_type = request.form.get('upload_type', 'file')
@@ -1794,14 +1709,12 @@ def _handle_upload():
     flash('Трек опубликован', 'success')
     return redirect(url_for('track', track_dir_id=t.track_dir_id))
 
-
 @app.route('/favorites')
 @login_required
 def favorites():
     favs = Favorite.query.filter_by(user_id=current_user.id).all()
     tracks = [db.session.get(Track, f.track_id) for f in favs]
     return render_template('favorites.html', tracks=[t for t in tracks if t])
-
 
 @app.route('/favorite/toggle/<string:track_dir_id>', methods=['POST'])
 @login_required
@@ -1816,7 +1729,6 @@ def toggle_favorite(track_dir_id):
     db.session.add(Favorite(user_id=current_user.id, track_id=t.id))
     commit_with_retry()
     return jsonify(status='added')
-
 
 @app.route('/history')
 @login_required
@@ -1833,7 +1745,6 @@ def listening_history():
         .order_by(desc(subq.c.max_time)).all()
     return render_template('history.html', history=items)
 
-
 @app.route('/history/delete/<string:track_dir_id>', methods=['POST'])
 @login_required
 def delete_history_item(track_dir_id):
@@ -1843,7 +1754,6 @@ def delete_history_item(track_dir_id):
     commit_with_retry()
     flash('Удалено', 'success')
     return redirect(url_for('listening_history'))
-
 
 @app.route('/user/<string:user_dir_id>')
 def user_profile(user_dir_id):
@@ -1859,13 +1769,11 @@ def user_profile(user_dir_id):
                            playlists=pls, stats=get_user_stats(u),
                            format_count=format_count)
 
-
 @app.route('/playlists')
 @login_required
 def playlists():
     return render_template('playlists.html',
                            playlists=Playlist.query.filter_by(user_id=current_user.id).all())
-
 
 @app.route('/playlist/new', methods=['POST'])
 @login_required
@@ -1878,7 +1786,6 @@ def create_playlist():
         flash(f'Плейлист "{name}" создан', 'success')
     return redirect(_safe_next())
 
-
 @app.route('/playlist/<string:playlist_dir_id>/delete', methods=['POST'])
 @login_required
 def delete_playlist(playlist_dir_id):
@@ -1890,7 +1797,6 @@ def delete_playlist(playlist_dir_id):
     commit_with_retry()
     flash('Удалён', 'success')
     return redirect(url_for('playlists'))
-
 
 @app.route('/playlist/<string:playlist_dir_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -1906,7 +1812,6 @@ def edit_playlist(playlist_dir_id):
         return redirect(url_for('view_playlist', playlist_dir_id=pl.playlist_dir_id))
     return render_template('edit_playlist.html', playlist=pl)
 
-
 @app.route('/api/playlist/<string:playlist_dir_id>/tracks')
 @login_required
 def api_playlist_tracks(playlist_dir_id):
@@ -1920,7 +1825,6 @@ def api_playlist_tracks(playlist_dir_id):
         'display_name': t.artist_name or t.uploader.display_name,
         'is_ai': t.is_ai, 'cover_url': _track_cover_url(t)
     } for t in tracks], playlist_name=pl.name, playlist_dir_id=pl.playlist_dir_id)
-
 
 @app.route('/playlist/<string:playlist_dir_id>')
 def view_playlist(playlist_dir_id):
@@ -1936,7 +1840,6 @@ def view_playlist(playlist_dir_id):
         t.lyrics_content = get_lyrics_content(t)
     return render_template('playlist.html', playlist=pl, tracks=tracks, is_owner=is_owner)
 
-
 @app.route('/playlist/<string:playlist_dir_id>/settings', methods=['POST'])
 @login_required
 def update_playlist_settings(playlist_dir_id):
@@ -1946,7 +1849,6 @@ def update_playlist_settings(playlist_dir_id):
     pl.is_public = request.form.get('is_public', 'false') == 'true'
     commit_with_retry()
     return jsonify(status='ok', is_public=pl.is_public)
-
 
 @app.route('/playlist/<string:playlist_dir_id>/add/<string:track_dir_id>', methods=['POST'])
 @login_required
@@ -1965,7 +1867,6 @@ def toggle_track_playlist(playlist_dir_id, track_dir_id):
     commit_with_retry()
     return jsonify(status='added')
 
-
 @app.route('/playlist/<string:playlist_dir_id>/remove/<string:track_dir_id>', methods=['POST'])
 @login_required
 def remove_from_playlist(playlist_dir_id, track_dir_id):
@@ -1978,7 +1879,6 @@ def remove_from_playlist(playlist_dir_id, track_dir_id):
         db.session.delete(pt)
         commit_with_retry()
     return jsonify(status='ok')
-
 
 @app.route('/api/playlist/<string:playlist_dir_id>/reorder', methods=['POST'])
 @login_required
@@ -1997,7 +1897,6 @@ def reorder_playlist(playlist_dir_id):
     commit_with_retry()
     return jsonify(status='ok')
 
-
 @app.route('/api/admin/toggle/<string:user_dir_id>', methods=['POST'])
 @login_required
 def toggle_admin(user_dir_id):
@@ -2010,7 +1909,6 @@ def toggle_admin(user_dir_id):
     commit_with_retry()
     return jsonify(status='ok', is_admin=u.is_admin)
 
-
 @app.route('/api/admin/recompute', methods=['POST'])
 @login_required
 def admin_recompute():
@@ -2018,7 +1916,6 @@ def admin_recompute():
         return jsonify(error='Access denied'), 403
     recompute_all_similarities()
     return jsonify(status='ok')
-
 
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
@@ -2153,10 +2050,8 @@ def settings():
                            linked_providers=linked_providers,
                            days_until_username_change=days_until_username_change)
 
-
 api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
 csrf.exempt(api_v1)
-
 
 @api_v1.route('/auth/register', methods=['POST'])
 @_rl('10/hour')
@@ -2186,7 +2081,6 @@ def register():
         'token_type': 'Bearer', 'user': serialize_user(u),
     })
 
-
 @api_v1.route('/auth/login', methods=['POST'])
 @_rl('20/minute')
 def login():
@@ -2203,6 +2097,52 @@ def login():
         'token_type': 'Bearer', 'user': serialize_user(u),
     })
 
+@api_v1.route('/auth/exchange', methods=['POST'])
+@_rl('10/minute')
+def desktop_exchange():
+    data = request.get_json(silent=True) or {}
+    code = data.get('code')
+    if not code:
+        return _json_error('bad_request', 'Code required')
+    
+    with _codes_lock:
+        payload = _desktop_codes.pop(code, None)
+        
+    if not payload:
+        return _json_error('unauthorized', 'Invalid or expired code', 401)
+        
+    user_id, created_at = payload
+    if time.time() - created_at > 30:
+        return _json_error('unauthorized', 'Code expired', 401)
+        
+    u = db.session.get(User, user_id)
+    if not u:
+        return _json_error('unauthorized', 'User not found', 401)
+        
+    access = issue_access_token(u)
+    refresh = issue_refresh_token(u)
+    return jsonify(ok=True, data={
+        'access_token': access, 'refresh_token': refresh,
+        'token_type': 'Bearer', 'user': serialize_user(u)
+    })
+
+@app.route('/auth/quick')
+def auth_quick():
+    desktop_redirect = request.args.get('desktop_redirect')
+    state = request.args.get('state')
+    
+    if not desktop_redirect or not re.match(r'^http://127\.0\.0\.1:\d+/callback$', desktop_redirect):
+        flash('Некорректный запрос от приложения', 'danger')
+        return redirect(url_for('index'))
+
+    if current_user.is_authenticated:
+        code = generate_desktop_code(current_user.id)
+        return redirect(f"{desktop_redirect}?code={code}&state={state}")
+    else:
+        flask_session['desktop_redirect'] = desktop_redirect
+        flask_session['desktop_state'] = state
+        flash('Войдите в аккаунт, чтобы вернуться в приложение', 'info')
+        return redirect(url_for('login'))
 
 @api_v1.route('/auth/refresh', methods=['POST'])
 @_rl('30/minute')
@@ -2227,19 +2167,16 @@ def refresh():
         'token_type': 'Bearer', 'user': serialize_user(u),
     })
 
-
 @api_v1.route('/auth/logout', methods=['POST'])
 @api_login_required
 def logout():
     revoke_user_tokens(g.api_user)
     return jsonify(ok=True)
 
-
 @api_v1.route('/auth/me')
 @api_login_required
 def me():
     return jsonify(ok=True, data=serialize_user(g.api_user, include_stats=True))
-
 
 @api_v1.route('/users/me', methods=['PATCH'])
 @api_login_required
@@ -2266,7 +2203,6 @@ def update_me():
     commit_with_retry()
     return jsonify(ok=True, data=serialize_user(u, include_stats=True))
 
-
 @api_v1.route('/tracks')
 @api_user_optional
 def list_tracks():
@@ -2284,7 +2220,6 @@ def list_tracks():
     return jsonify(ok=True, data={'items': [serialize_track(t) for t in pg.items],
                                    'page': pg.page, 'per_page': pg.per_page,
                                    'total': pg.total, 'pages': pg.pages})
-
 
 @api_v1.route('/tracks', methods=['POST'])
 @api_login_required
@@ -2401,7 +2336,6 @@ def create_track():
         _dispatch_webhooks(g.api_user.id, 'upload', {'track_id': t.track_dir_id})
         return jsonify(ok=True, data=serialize_track(t))
 
-
 @api_v1.route('/tracks/<string:track_dir_id>')
 @api_user_optional
 def get_track(track_dir_id):
@@ -2423,7 +2357,6 @@ def get_track(track_dir_id):
         data['user_rating'] = 0
         data['in_playlists'] = []
     return jsonify(ok=True, data=data)
-
 
 @api_v1.route('/tracks/<string:track_dir_id>', methods=['PATCH', 'DELETE'])
 @api_login_required
@@ -2484,7 +2417,6 @@ def modify_track(track_dir_id):
     commit_with_retry()
     return jsonify(ok=True, data=serialize_track(t))
 
-
 @api_v1.route('/tracks/<string:track_dir_id>/stream')
 def stream_track(track_dir_id):
     t = Track.query.filter_by(track_dir_id=track_dir_id).first()
@@ -2499,7 +2431,6 @@ def stream_track(track_dir_id):
     resp.headers['Cache-Control'] = 'private, max-age=3600'
     return resp
 
-
 @api_v1.route('/tracks/<string:track_dir_id>/similar')
 @api_user_optional
 def similar_tracks(track_dir_id):
@@ -2512,14 +2443,12 @@ def similar_tracks(track_dir_id):
         user = None
     return jsonify(ok=True, data={'items': [serialize_track(x) for x in get_track_recommendations(t, user, limit=limit)]})
 
-
 @api_v1.route('/tracks/<string:track_dir_id>/lyrics')
 def get_lyrics(track_dir_id):
     t = Track.query.filter_by(track_dir_id=track_dir_id).first()
     if not t:
         return _json_error('not_found', 'Track not found', 404)
     return jsonify(ok=True, data={'lyrics': get_lyrics_content(t)})
-
 
 @api_v1.route('/tracks/<string:track_dir_id>/rate', methods=['POST'])
 @api_login_required
@@ -2566,7 +2495,6 @@ def rate(track_dir_id):
         db.session.rollback()
         return _json_error('internal_error', 'Retry', 503)
 
-
 @api_v1.route('/tracks/<string:track_dir_id>/listen', methods=['POST'])
 @api_login_required
 @_rl('120/minute')
@@ -2599,7 +2527,6 @@ def listen(track_dir_id):
         db.session.rollback()
         return _json_error('internal_error', 'Failed', 500)
 
-
 @api_v1.route('/tracks/<string:track_dir_id>/favorite', methods=['POST', 'DELETE'])
 @api_login_required
 def favorite(track_dir_id):
@@ -2617,7 +2544,6 @@ def favorite(track_dir_id):
         commit_with_retry()
     return jsonify(ok=True, data={'is_favorite': True})
 
-
 @api_v1.route('/recommendations')
 @api_user_optional
 def recommendations():
@@ -2626,7 +2552,6 @@ def recommendations():
     if user and not getattr(user, 'is_authenticated', True):
         user = None
     return jsonify(ok=True, data={'items': [serialize_track(t) for t in get_recommendations(user, limit)]})
-
 
 @api_v1.route('/charts')
 def charts():
@@ -2638,7 +2563,6 @@ def charts():
         .group_by(Track.id).order_by(desc('cnt')).limit(limit).all()
     return jsonify(ok=True, data={'period_days': days, 'items': [serialize_track(r[0]) for r in rows]})
 
-
 @api_v1.route('/new-releases')
 def new_releases():
     days = request.args.get('days', 7, type=int)
@@ -2646,7 +2570,6 @@ def new_releases():
     rows = Track.query.filter(Track.uploaded_at >= utcnow() - timedelta(days=days)) \
         .order_by(Track.uploaded_at.desc()).limit(limit).all()
     return jsonify(ok=True, data={'items': [serialize_track(t) for t in rows]})
-
 
 @api_v1.route('/search')
 def search_v1():
@@ -2671,7 +2594,6 @@ def search_v1():
         Track.uploader.has(User.display_name.ilike(f'%{q}%'))
     )).order_by(Track.play_count.desc()).limit(limit).all()
     return jsonify(ok=True, data={'type': 'tracks', 'items': [serialize_track(t) for t in rows]})
-
 
 @api_v1.route('/advanced-search')
 def advanced():
@@ -2698,7 +2620,6 @@ def advanced():
         q = q.filter(Track.is_ai.is_(False))
     return jsonify(ok=True, data={'items': [serialize_track(t) for t in q.order_by(Track.uploaded_at.desc()).limit(limit).all()]})
 
-
 @api_v1.route('/tags')
 def tags():
     q = request.args.get('q', '').strip()
@@ -2708,14 +2629,12 @@ def tags():
         query = query.filter(Tag.name.ilike(f'%{q}%'))
     return jsonify(ok=True, data={'items': [{'name': t.name} for t in query.order_by(Tag.name).limit(limit).all()]})
 
-
 @api_v1.route('/users/<string:user_dir_id>')
 def user_get(user_dir_id):
     u = User.query.filter_by(user_dir_id=user_dir_id).first()
     if not u:
         return _json_error('not_found', 'User not found', 404)
     return jsonify(ok=True, data=serialize_user(u, include_stats=True))
-
 
 @app.route('/api/v1/users/<string:user_dir_id>/tracks')
 def user_tracks(user_dir_id):
@@ -2738,7 +2657,6 @@ def user_tracks(user_dir_id):
         'pages': pg.pages,
     })
 
-
 @api_v1.route('/users/<string:user_dir_id>/playlists')
 @api_user_optional
 def user_playlists(user_dir_id):
@@ -2751,14 +2669,12 @@ def user_playlists(user_dir_id):
         rows = Playlist.query.filter_by(user_id=u.id, is_public=True).order_by(Playlist.name).all()
     return jsonify(ok=True, data={'items': [serialize_playlist(p) for p in rows]})
 
-
 @api_v1.route('/favorites')
 @api_login_required
 def favorites_v1():
     favs = Favorite.query.filter_by(user_id=g.api_user.id).order_by(Favorite.created_at.desc()).all()
     tracks = [db.session.get(Track, f.track_id) for f in favs]
     return jsonify(ok=True, data={'items': [serialize_track(t) for t in tracks if t]})
-
 
 @api_v1.route('/history')
 @api_login_required
@@ -2781,7 +2697,6 @@ def history_v1():
                           'count': row.count})
     return jsonify(ok=True, data={'items': items})
 
-
 @api_v1.route('/history/<string:track_dir_id>', methods=['DELETE'])
 @api_login_required
 def history_delete(track_dir_id):
@@ -2793,13 +2708,11 @@ def history_delete(track_dir_id):
     commit_with_retry()
     return jsonify(ok=True)
 
-
 @api_v1.route('/playlists')
 @api_login_required
 def playlists_list():
     rows = Playlist.query.filter_by(user_id=g.api_user.id).order_by(Playlist.name).all()
     return jsonify(ok=True, data={'items': [serialize_playlist(p) for p in rows]})
-
 
 @api_v1.route('/playlists', methods=['POST'])
 @api_login_required
@@ -2814,7 +2727,6 @@ def playlists_create():
     commit_with_retry()
     return jsonify(ok=True, data=serialize_playlist(pl))
 
-
 @api_v1.route('/playlists/<string:playlist_dir_id>')
 @api_user_optional
 def playlist_get(playlist_dir_id):
@@ -2824,7 +2736,6 @@ def playlist_get(playlist_dir_id):
     if not pl.is_public and (not g.api_user or (g.api_user.id != pl.user_id and not g.api_user.is_admin)):
         return _json_error('forbidden', 'Access denied', 403)
     return jsonify(ok=True, data=serialize_playlist(pl, include_tracks=True))
-
 
 @api_v1.route('/playlists/<string:playlist_dir_id>', methods=['PATCH', 'DELETE'])
 @api_login_required
@@ -2845,7 +2756,6 @@ def playlist_modify(playlist_dir_id):
         pl.is_public = bool(data['is_public'])
     commit_with_retry()
     return jsonify(ok=True, data=serialize_playlist(pl))
-
 
 @api_v1.route('/playlists/<string:playlist_dir_id>/tracks', methods=['POST'])
 @api_login_required
@@ -2868,7 +2778,6 @@ def playlist_add_track(playlist_dir_id):
         commit_with_retry()
     return jsonify(ok=True, data={'track_count': pl.tracks.count()})
 
-
 @api_v1.route('/playlists/<string:playlist_dir_id>/tracks/<string:track_dir_id>', methods=['DELETE'])
 @api_login_required
 def playlist_remove_track(playlist_dir_id, track_dir_id):
@@ -2885,7 +2794,6 @@ def playlist_remove_track(playlist_dir_id, track_dir_id):
         db.session.delete(pt)
         commit_with_retry()
     return jsonify(ok=True, data={'track_count': pl.tracks.count()})
-
 
 @api_v1.route('/playlists/<string:playlist_dir_id>/reorder', methods=['POST'])
 @api_login_required
@@ -2908,7 +2816,6 @@ def playlist_reorder(playlist_dir_id):
     commit_with_retry()
     return jsonify(ok=True)
 
-
 @api_v1.route('/webhooks')
 @api_login_required
 def webhooks_list():
@@ -2916,7 +2823,6 @@ def webhooks_list():
     return jsonify(ok=True, data={'items': [{'id': w.id, 'url': w.url,
                                               'events': w.event_types.split(','),
                                               'active': w.active} for w in rows]})
-
 
 @api_v1.route('/webhooks', methods=['POST'])
 @api_login_required
@@ -2934,7 +2840,6 @@ def webhooks_create():
     return jsonify(ok=True, data={'id': w.id, 'url': w.url, 'secret': secret,
                                    'events': w.event_types.split(',')})
 
-
 @api_v1.route('/webhooks/<int:wid>', methods=['DELETE'])
 @api_login_required
 def webhooks_delete(wid):
@@ -2944,7 +2849,6 @@ def webhooks_delete(wid):
     db.session.delete(w)
     commit_with_retry()
     return jsonify(ok=True)
-
 
 @sock.route('/ws/now-playing')
 def ws_now_playing(ws):
@@ -2982,10 +2886,8 @@ def ws_now_playing(ws):
             if not lst:
                 _ws_clients.pop(uid, None)
 
-
 def _oauth_redirect_uri(provider):
     return url_for('oauth_callback', provider=provider, _external=True)
-
 
 @app.route('/auth/<string:provider>/login')
 @_rl('20/minute')
@@ -2998,10 +2900,14 @@ def oauth_start(provider):
     flask_session['oauth_state'] = state
     flask_session['oauth_provider'] = provider
     
-    if request.args.get('link') == '1' and current_user.is_authenticated:
-        flask_session['oauth_link'] = True
+    desktop_redirect = request.args.get('desktop_redirect')
+    desktop_state = request.args.get('state')
+    if desktop_redirect and re.match(r'^http://127\.0\.0\.1:\d+/callback$', desktop_redirect):
+        flask_session['desktop_redirect'] = desktop_redirect
+        flask_session['desktop_state'] = desktop_state
     else:
-        flask_session['oauth_link'] = False
+        flask_session['desktop_redirect'] = None
+        flask_session['desktop_state'] = None
 
     from urllib.parse import urlencode
     params = {
@@ -3016,7 +2922,6 @@ def oauth_start(provider):
         params['prompt'] = 'select_account'
     return redirect(cfg['authorize_url'] + '?' + urlencode(params))
 
-
 @app.route('/auth/<string:provider>/callback')
 def oauth_callback(provider):
     if provider not in OAUTH_PROVIDERS:
@@ -3024,16 +2929,15 @@ def oauth_callback(provider):
         return redirect(url_for('login'))
     state = request.args.get('state', '')
     expected = flask_session.pop('oauth_state', None)
-    is_linking = flask_session.pop('oauth_link', False)
     
     if not expected or state != expected:
         flash('Неверный state OAuth', 'danger')
-        return redirect(url_for('settings') if is_linking else url_for('login'))
+        return redirect(url_for('login'))
         
     code = request.args.get('code', '')
     if not code:
         flash('OAuth отказано', 'danger')
-        return redirect(url_for('settings') if is_linking else url_for('login'))
+        return redirect(url_for('login'))
         
     cfg = OAUTH_PROVIDERS[provider]
     headers = {'Accept': 'application/json'}
@@ -3056,7 +2960,7 @@ def oauth_callback(provider):
         info = r.json()
     except Exception as e:
         flash(f'OAuth ошибка: {e}', 'danger')
-        return redirect(url_for('settings') if is_linking else url_for('login'))
+        return redirect(url_for('login'))
         
     if provider == 'google':
         pid = str(info.get('id') or info.get('sub') or '')
@@ -3079,25 +2983,7 @@ def oauth_callback(provider):
                 
     if not pid or not email:
         flash('OAuth: не удалось получить email', 'danger')
-        return redirect(url_for('settings') if is_linking else url_for('login'))
-
-    if is_linking:
-        if not current_user.is_authenticated:
-            flash('Сессия истекла, попробуйте снова', 'danger')
-            return redirect(url_for('login'))
-            
-        existing = OAuthAccount.query.filter_by(provider=provider, provider_user_id=pid).first()
-        if existing:
-            if existing.user_id == current_user.id:
-                flash('Этот аккаунт уже привязан к вашему профилю', 'info')
-            else:
-                flash('Этот аккаунт уже привязан к другому пользователю', 'danger')
-            return redirect(url_for('settings'))
-            
-        db.session.add(OAuthAccount(user_id=current_user.id, provider=provider, provider_user_id=pid))
-        commit_with_retry()
-        flash(f'Аккаунт {provider} успешно привязан', 'success')
-        return redirect(url_for('settings'))
+        return redirect(url_for('login'))
 
     acct = OAuthAccount.query.filter_by(provider=provider, provider_user_id=pid).first()
     if acct:
@@ -3125,8 +3011,14 @@ def oauth_callback(provider):
         return redirect(url_for('login'))
         
     login_user(u)
+    
+    desktop_redirect = flask_session.pop('desktop_redirect', None)
+    desktop_state = flask_session.pop('desktop_state', None)
+    if desktop_redirect and re.match(r'^http://127\.0\.0\.1:\d+/callback$', desktop_redirect):
+        desktop_code = generate_desktop_code(u.id)
+        return redirect(f"{desktop_redirect}?code={desktop_code}&state={desktop_state}")
+        
     return redirect(url_for('index'))
-
 
 OPENAPI = {
     'openapi': '3.1.0',
@@ -3172,11 +3064,9 @@ OPENAPI = {
     },
 }
 
-
 @app.route('/api/v1/openapi.json')
 def openapi_spec():
     return jsonify(OPENAPI)
-
 
 @app.route('/api/v1/docs')
 def openapi_docs():
@@ -3188,9 +3078,7 @@ def openapi_docs():
 <script>SwaggerUIBundle({url:'/api/v1/openapi.json',dom_id:'#ui'});</script>
 </body></html>'''
 
-
 app.register_blueprint(api_v1)
-
 
 if __name__ == '__main__':
     with app.app_context():
