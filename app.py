@@ -1476,6 +1476,7 @@ def api_widget_playlist_tracks(token, playlist_dir_id):
     } for t in rows])
 
 @app.route('/api/widget/<string:token>/listen/<string:track_dir_id>', methods=['POST'])
+@csrf.exempt
 @_rl('120/minute')
 def api_widget_listen(token, track_dir_id):
     u = User.query.filter_by(widget_token=token).first_or_404()
@@ -1506,6 +1507,7 @@ def api_widget_listen(token, track_dir_id):
     return jsonify(status='ok')
 
 @app.route('/api/widget/<string:token>/stop', methods=['POST'])
+@csrf.exempt
 def api_widget_stop(token):
     u = User.query.filter_by(widget_token=token).first_or_404()
     u.current_track_id = None
