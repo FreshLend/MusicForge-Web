@@ -1,80 +1,173 @@
 {% extends "base.html" %}
 {% block content %}
 <h2 class="mb-4">Настройки</h2>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="glass-card p-4">
+            <h4 class="mb-3">Способы входа</h4>
+            <ul class="list-group list-group-flush mb-3">
+                <li class="list-group-item bg-transparent d-flex justify-content-between align-items-center px-0">
+                    <div><i class="fas fa-envelope me-2 text-muted"></i> Email и пароль</div>
+                    <div>
+                        {% if current_user.has_custom_password %}
+                            <span class="badge bg-success">Установлен</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Не установлен</span>
+                        {% endif %}
+                    </div>
+                </li>
+                {% for p in oauth_providers %}
+                <li class="list-group-item bg-transparent d-flex justify-content-between align-items-center px-0">
+                    <div>
+                        {% if p == 'google' %}<i class="fab fa-google me-2 text-danger"></i> Google
+                        {% elif p == 'github' %}<i class="fab fa-github me-2 text-white"></i> GitHub
+                        {% else %}<i class="fas fa-key me-2 text-muted"></i> {{ p|capitalize }}{% endif %}
+                    </div>
+                    <div>
+                        {% if p in linked_providers %}
+                            <span class="badge bg-success me-2">Привязан</span>
+                            <form method="post" class="d-inline">
+                                <input type="hidden" name="action" value="unlink_oauth">
+                                <input type="hidden" name="provider" value="{{ p }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" {% if not current_user.has_custom_password and linked_providers|length <= 1 %}disabled title="Нельзя отвязать единственный способ входа"{% endif %}>Отвязать</button>
+                            </form>
+                        {% else %}
+                            <a href="{{ url_for('oauth_start', provider=p) }}?link=1" class="btn btn-sm btn-outline-neon" data-no-spa>Привязать</a>
+                        {% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+
+            {% if not current_user.has_custom_password %}
+            <hr>
+            <h5 class="mb-3">Установить пароль</h5>
+            <form method="post">
+                <input type="hidden" name="action" value="set_password">
+                <div class="mb-2">
+                    <input type="password" name="new_password" class="form-control" placeholder="Новый пароль (мин. 8 символов)" required minlength="8">
+                </div>
+                <div class="mb-2">
+                    <input type="password" name="confirm_password" class="form-control" placeholder="Подтвердите пароль" required minlength="8">
+                </div>
+                <button type="submit" class="btn btn-neon w-100">Установить пароль</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-md-6 mb-4">
+        <div class="glass-card p-4">
+            <h4 class="mb-3">Сменить логин</h4>
+            <form method="post">
+                <input type="hidden" name="action" value="change_username">
+                <div class="mb-3">
+                    <label class="form-label">Текущий логин: <strong>@{{ current_user.login }}</strong></label>
+                    <input type="text" name="new_login" class="form-control" placeholder="Новый логин" required minlength="3" {% if days_until_username_change > 0 %}disabled{% endif %}>
+                </div>
+                {% if days_until_username_change > 0 %}
+                    <div class="alert alert-warning py-2 mb-2 small">
+                        Вы сможете изменить логин снова через {{ days_until_username_change }} дн.
+                    </div>
+                {% else %}
+                    <button type="submit" class="btn btn-neon w-100 mb-2">Изменить логин</button>
+                    <small class="text-muted">Логин можно менять не чаще одного раза в 7 дней.</small>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+</div>
+
+<hr>
+<h4 class="mb-3">Профиль</h4>
 <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="action" value="profile">
-    <div class="mb-3">
-        <label class="form-label">Отображаемое имя</label>
-        <input type="text" name="display_name" class="form-control" value="{{ current_user.display_name }}">
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Email</label>
-        <input type="email" name="email" class="form-control" value="{{ current_user.email }}">
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Аватар</label>
-        <input type="file" name="avatar" class="form-control" accept="image/*">
-    </div>
-    <div class="mb-3">
-        <label class="form-label">О себе</label>
-        <textarea name="bio" class="form-control" rows="3">{{ current_user.bio or '' }}</textarea>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Отображаемое имя</label>
+            <input type="text" name="display_name" class="form-control" value="{{ current_user.display_name }}">
+        </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control" value="{{ current_user.email }}">
+        </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Аватар</label>
+            <input type="file" name="avatar" class="form-control" accept="image/*">
+        </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label">О себе</label>
+            <textarea name="bio" class="form-control" rows="2">{{ current_user.bio or '' }}</textarea>
+        </div>
     </div>
     <button type="submit" class="btn btn-neon">Сохранить профиль</button>
 </form>
+
 <hr>
-<form method="post">
-    <input type="hidden" name="action" value="regenerate_widget_token">
-    <h4>Виджеты</h4>
-    <div class="mb-3">
-        <label class="form-label">Секретный токен</label>
-        <div class="input-group">
-            <input type="text" class="form-control" value="{{ current_user.widget_token or '' }}" readonly id="widgetToken">
-            <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('widgetToken').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
-            <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Перегенерировать токен? Все существующие виджеты перестанут работать.')">Перегенерировать</button>
-        </div>
-        <small class="text-muted">Токен даёт доступ к информации «сейчас играет». Не публикуйте его.</small>
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <h4 class="mb-3">Виджеты</h4>
+        <form method="post">
+            <input type="hidden" name="action" value="regenerate_widget_token">
+            <div class="mb-3">
+                <label class="form-label">Секретный токен</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" value="{{ current_user.widget_token or '' }}" readonly id="widgetToken">
+                    <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('widgetToken').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
+                    <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Перегенерировать токен? Все существующие виджеты перестанут работать.')">Перегенерировать</button>
+                </div>
+                <small class="text-muted">Токен даёт доступ к информации «сейчас играет». Не публикуйте его.</small>
+            </div>
+        </form>
     </div>
-</form>
-<hr>
-<form method="post">
-    <input type="hidden" name="action" value="regenerate_api_token">
-    <h4>API токен (Bearer)</h4>
-    {% if one_time_token %}
-    <div class="alert alert-success">
-        <div class="mb-2"><strong>Скопируйте сейчас</strong> — токен больше не будет показан.</div>
-        <div class="input-group mb-2">
-            <input type="text" class="form-control" value="{{ one_time_token }}" readonly id="oneApi">
-            <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('oneApi').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
-        </div>
-        {% if one_time_refresh %}
-        <div class="mb-1"><small>Refresh token — для обновления access через <code>/api/v1/auth/refresh</code>:</small></div>
-        <div class="input-group">
-            <input type="text" class="form-control" value="{{ one_time_refresh }}" readonly id="oneRefresh">
-            <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('oneRefresh').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
-        </div>
-        {% endif %}
+    <div class="col-md-6 mb-4">
+        <h4 class="mb-3">API токен (Bearer)</h4>
+        <form method="post">
+            <input type="hidden" name="action" value="regenerate_api_token">
+            {% if one_time_token %}
+            <div class="alert alert-success">
+                <div class="mb-2"><strong>Скопируйте сейчас</strong> — токен больше не будет показан.</div>
+                <div class="input-group mb-2">
+                    <input type="text" class="form-control" value="{{ one_time_token }}" readonly id="oneApi">
+                    <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('oneApi').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
+                </div>
+                {% if one_time_refresh %}
+                <div class="mb-1"><small>Refresh token — для обновления access через <code>/api/v1/auth/refresh</code>:</small></div>
+                <div class="input-group">
+                    <input type="text" class="form-control" value="{{ one_time_refresh }}" readonly id="oneRefresh">
+                    <button type="button" class="btn btn-outline-neon" onclick="navigator.clipboard.writeText(document.getElementById('oneRefresh').value); this.textContent='Скопировано'; setTimeout(()=>this.textContent='Копировать', 1500);">Копировать</button>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted mb-2">Используется для доступа из приложений через заголовок <code>Authorization: Bearer &lt;token&gt;</code>. Токен не отображается после выдачи.</p>
+            {% endif %}
+            <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Выпустить новый токен? Все приложения потеряют доступ.')">Выпустить новый токен</button>
+        </form>
     </div>
-    {% else %}
-    <p class="text-muted mb-2">Используется для доступа из приложений через заголовок <code>Authorization: Bearer &lt;token&gt;</code>. Токен не отображается после выдачи.</p>
-    {% endif %}
-    <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Выпустить новый токен? Все приложения потеряют доступ.')">Выпустить новый токен</button>
-</form>
+</div>
+
+{% if current_user.has_custom_password %}
 <hr>
+<h4 class="mb-3">Сменить пароль</h4>
 <form method="post">
     <input type="hidden" name="action" value="password">
-    <h4>Сменить пароль</h4>
-    <div class="mb-3">
-        <label class="form-label">Текущий пароль</label>
-        <input type="password" name="current_password" class="form-control" required>
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Новый пароль (минимум 8 символов)</label>
-        <input type="password" name="new_password" class="form-control" required minlength="8">
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Подтвердите новый пароль</label>
-        <input type="password" name="confirm_password" class="form-control" required minlength="8">
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Текущий пароль</label>
+            <input type="password" name="current_password" class="form-control" required>
+        </div>
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Новый пароль (мин. 8 символов)</label>
+            <input type="password" name="new_password" class="form-control" required minlength="8">
+        </div>
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Подтвердите новый пароль</label>
+            <input type="password" name="confirm_password" class="form-control" required minlength="8">
+        </div>
     </div>
     <button type="submit" class="btn btn-neon">Сменить пароль</button>
 </form>
+{% endif %}
 {% endblock %}
