@@ -62,7 +62,7 @@
                             <i class="{% if is_favorite %}fas{% else %}far{% endif %} fa-heart"></i>
                         </button>
                         <button class="btn-rating" id="subtitlesToggle" title="Субтитры" disabled style="opacity:0.5;pointer-events:none;"><i class="fas fa-closed-captioning"></i></button>
-                        {% if current_user.is_authenticated %}
+                        {% if current_user %}
                         <div class="dropdown d-inline">
                             <button class="btn-rating" data-bs-toggle="dropdown" title="Добавить в плейлист"><i class="fas fa-plus-circle"></i></button>
                             <ul class="dropdown-menu custom-dropdown" id="playlistDropdown">
@@ -80,7 +80,7 @@
                         </div>
                         {% endif %}
                         <span class="plays-info"><i class="far fa-eye"></i> {{ format_count(track.play_count) }}</span>
-                        {% if current_user.is_authenticated and (current_user.id == track.uploader_id or current_user.is_admin) %}
+                        {% if current_user and (current_user.id == track.uploader_id or current_user.is_admin) %}
                         <a href="{{ url_for('edit_track', track_dir_id=track.track_dir_id) }}" class="btn-play-small" title="Редактировать"><i class="fas fa-edit"></i></a>
                         <form method="post" action="{{ url_for('delete_track', track_dir_id=track.track_dir_id) }}" style="display:inline">
                             <button type="submit" class="btn-play-small" title="Удалить" onclick="return confirm('Удалить трек?')"><i class="fas fa-trash"></i></button>
@@ -383,7 +383,7 @@
     }
 
     window.rateTrack = async function (trackDirId, value) {
-        const resp = await fetch('/api/rate/' + trackDirId, {
+        const resp = await fetch('/api/v1/tracks/' + trackDirId + '/rate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'value=' + value
@@ -406,14 +406,18 @@
     }
 
     window.toggleFavorite = async function (trackDirId) {
-        const resp = await fetch('/favorite/toggle/' + trackDirId, { method: 'POST' });
+        const resp = await fetch('/api/v1/tracks/' + trackDirId + '/favorite', { method: 'POST' });
         const data = await resp.json();
         const btn = document.getElementById('favBtn');
         btn.innerHTML = (data.status === 'added' ? '<i class="fas fa-heart"></i>' : '<i class="far fa-heart"></i>');
     };
 
     window.togglePlaylistTrack = async function (plDirId, trackDirId, el) {
-        const resp = await fetch('/playlist/' + plDirId + '/add/' + trackDirId, { method: 'POST' });
+        const resp = await fetch('/api/v1/playlists/' + plDirId + '/tracks', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_dir_id: trackDirId })
+        });
         const data = await resp.json();
         const icon = el.querySelector('i');
         if (data.status === 'added') icon.style.display = 'inline-block';

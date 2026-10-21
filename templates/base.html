@@ -4,22 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
+    <meta name="description" content="MusicForge — ваша личная музыкальная платформа. Слушайте треки, создавайте плейлисты и делитесь музыкой.">
+    
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    
+    <link rel="icon" href="{{ url_for('static', filename='logo.webp') }}" type="image/webp">
     <title>MusicForge</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></noscript>
+    
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"></noscript>
+    
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap"></noscript>
+    
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="app-content">
         <nav class="navbar navbar-expand-lg sticky-top">
             <div class="container-fluid">
                 <a class="navbar-brand d-flex align-items-center gap-2" href="/">
-                    <img src="{{ url_for('static', filename='favicon.ico') }}" alt="" style="height: 24px; width: 24px;">
+                    <img src="{{ url_for('static', filename='logo.webp') }}" alt="Логотип MusicForge" style="height: 24px; width: 24px;">
                     <span><span class="brand-music">Music</span><span class="brand-forge">Forge</span></span>
                 </a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-label="Открыть меню">
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <div class="collapse navbar-collapse" id="navbarNav">
@@ -29,23 +43,23 @@
                     </ul>
                     <ul class="navbar-nav ms-auto align-items-center">
                         <li class="nav-item">
-                            <a class="nav-link icon-link" href="{{ url_for('random_track') }}" title="Случайный релиз"><i class="fas fa-random"></i></a>
+                            <a class="nav-link icon-link" href="{{ url_for('random_track') }}" title="Случайный релиз" aria-label="Случайный релиз"><i class="fas fa-random"></i></a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link icon-link" href="#" data-bs-toggle="modal" data-bs-target="#searchModal" title="Поиск"><i class="fas fa-search"></i></a>
+                            <a class="nav-link icon-link" href="#" data-bs-toggle="modal" data-bs-target="#searchModal" title="Поиск" aria-label="Поиск"><i class="fas fa-search"></i></a>
                         </li>
-                        {% if current_user.is_authenticated %}
+                        {% if current_user %}
                         <li class="nav-item">
-                            <a class="nav-link icon-link" href="{{ url_for('upload') }}" title="Опубликовать трек"><i class="fas fa-plus"></i></a>
+                            <a class="nav-link icon-link" href="{{ url_for('upload') }}" title="Опубликовать трек" aria-label="Опубликовать трек"><i class="fas fa-plus"></i></a>
                         </li>
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                <img src="{{ url_for('static', filename='users/' + current_user.user_dir_id + '/' + current_user.user_dir_id + '.webp') }}" class="rounded-circle avatar-small" alt="Avatar" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
+                                <img src="{{ url_for('static', filename='users/' + current_user.user_dir_id + '/' + current_user.user_dir_id + '.webp') }}" class="rounded-circle avatar-small" alt="Аватар пользователя {{ current_user.display_name }}" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
                                 <li>
                                     <div class="dropdown-item-text text-center">
-                                        <img src="{{ url_for('static', filename='users/' + current_user.user_dir_id + '/' + current_user.user_dir_id + '.webp') }}" class="rounded-circle mb-2 avatar-medium" alt="Avatar" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
+                                        <img src="{{ url_for('static', filename='users/' + current_user.user_dir_id + '/' + current_user.user_dir_id + '.webp') }}" class="rounded-circle mb-2 avatar-medium" alt="Аватар пользователя {{ current_user.display_name }}" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
                                         <strong class="d-block">{{ current_user.display_name }}</strong>
                                         <small class="text-muted">@{{ current_user.login }}</small>
                                     </div>
@@ -76,7 +90,7 @@
                 <div class="modal-content">
                     <div class="modal-header border-0">
                         <h5 class="modal-title">Новый плейлист</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Закрыть"></button>
                     </div>
                     <form method="post" action="{{ url_for('create_playlist') }}">
                         <div class="modal-body">
@@ -95,7 +109,7 @@
                 <div class="modal-content">
                     <div class="modal-header border-0">
                         <h5 class="modal-title">Поиск</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Закрыть"></button>
                     </div>
                     <div class="modal-body">
                         <form action="{{ url_for('search') }}" method="get">
@@ -108,7 +122,7 @@
             </div>
         </div>
 
-        <div class="container mt-4">
+        <main class="container mt-4">
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
@@ -117,35 +131,73 @@
                 {% endif %}
             {% endwith %}
             {% block content %}{% endblock %}
-        </div>
+        </main>
     </div>
 
     <div id="mini-player" class="mini-player" style="display:none;">
         <div class="mp-progress-wrap" id="mp-progress-wrap">
             <div class="mp-progress-fill" id="mp-progress-fill"></div>
         </div>
-        <img id="mp-cover" class="mp-cover" src="" alt="" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_cover.webp') }}';">
+        <img id="mp-cover" class="mp-cover" src="" alt="Обложка" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_cover.webp') }}';">
         <div class="mp-info">
             <div id="mp-title" class="mp-title"></div>
             <div id="mp-artist" class="mp-artist"></div>
         </div>
         <div class="mp-controls">
-            <button id="mp-prev" class="mp-btn" title="Назад"><i class="fas fa-step-backward"></i></button>
-            <button id="mp-play" class="mp-btn mp-play"><i class="fas fa-play"></i></button>
-            <button id="mp-next" class="mp-btn" title="Вперёд"><i class="fas fa-step-forward"></i></button>
-            <button id="mp-loop" class="mp-btn" title="Зациклить"><i class="fas fa-redo"></i></button>
+            <button id="mp-prev" class="mp-btn" title="Назад" aria-label="Назад"><i class="fas fa-step-backward"></i></button>
+            <button id="mp-play" class="mp-btn mp-play" aria-label="Играть"><i class="fas fa-play"></i></button>
+            <button id="mp-next" class="mp-btn" title="Вперёд" aria-label="Вперёд"><i class="fas fa-step-forward"></i></button>
+            <button id="mp-loop" class="mp-btn" title="Зациклить" aria-label="Зациклить"><i class="fas fa-redo"></i></button>
         </div>
         <div class="mp-time" id="mp-time">0:00 / 0:00</div>
         <div class="mp-volume">
             <i class="fas fa-volume-up" id="mp-vol-icon"></i>
-            <input type="range" id="mp-vol-slider" min="0" max="1" step="0.01" value="1">
+            <input type="range" id="mp-vol-slider" min="0" max="1" step="0.01" value="1" aria-label="Громкость">
         </div>
-        <button id="mp-close" class="mp-btn" title="Закрыть"><i class="fas fa-times"></i></button>
+        <button id="mp-close" class="mp-btn" title="Закрыть" aria-label="Закрыть плеер"><i class="fas fa-times"></i></button>
     </div>
     <audio id="globalAudio" preload="metadata"></audio>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
 
     <script>
+    window.initInfiniteScroll = function(gridId, sentinelId, apiUrl, sort, q, user_dir_id) {
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMore = true;
+        const grid = document.getElementById(gridId);
+        const sentinel = document.getElementById(sentinelId);
+        if (!grid || !sentinel) return;
+
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !isLoading && hasMore) {
+                loadMore();
+            }
+        }, { rootMargin: '300px' });
+
+        function loadMore() {
+            isLoading = true;
+            currentPage++;
+            let url = `${apiUrl}?page=${currentPage}&per_page=20&sort=${sort}`;
+            if (q) url += `&q=${encodeURIComponent(q)}`;
+            if (user_dir_id) url += `&user_dir_id=${encodeURIComponent(user_dir_id)}`;
+
+            fetch(url)
+                .then(res => {
+                    hasMore = res.headers.get('X-Has-More') === 'true';
+                    return res.text();
+                })
+                .then(html => {
+                    if (html.trim() === '') hasMore = false;
+                    else grid.insertAdjacentHTML('beforeend', html);
+                    isLoading = false;
+                })
+                .catch(() => { isLoading = false; });
+        }
+
+        observer.observe(sentinel);
+        window.PageCleanup = () => observer.disconnect();
+    };
+
     (function () {
         var meta = document.querySelector('meta[name="csrf-token"]');
         var token = meta ? meta.content : '';
@@ -347,7 +399,7 @@
                 const t = state.queue[state.index];
                 if (t && t.id && listenReportedForId !== t.id && audio.currentTime >= 15) {
                     listenReportedForId = t.id;
-                    fetch('/api/listen/' + t.id, { method: 'POST' }).catch(function () {});
+                    fetch('/api/v1/tracks/' + t.id + '/listen', { method: 'POST' }).catch(function () {});
                 }
             }
             emit('timeupdate');
@@ -439,6 +491,10 @@
             return true;
         }
         async function navigateTo(url, pushState, replace) {
+            if (window.PageCleanup) {
+                window.PageCleanup();
+                window.PageCleanup = null;
+            }
             const audio = document.getElementById('globalAudio');
             const wasPlaying = audio && !audio.paused;
             try {

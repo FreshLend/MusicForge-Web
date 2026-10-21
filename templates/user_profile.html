@@ -3,7 +3,7 @@
 <div class="profile-header mb-4">
     <div class="row align-items-center">
         <div class="col-md-auto text-center mb-3 mb-md-0">
-            <img src="{{ url_for('static', filename='users/' + user.user_dir_id + '/' + user.user_dir_id + '.webp') }}" class="rounded-circle" style="width: 128px; height: 128px; object-fit: cover;" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'">
+            <img src="{{ url_for('static', filename='users/' + user.user_dir_id + '/' + user.user_dir_id + '.webp') }}" class="rounded-circle" style="width: 128px; height: 128px; object-fit: cover;" onerror="this.onerror=null;this.src='{{ url_for('static', filename='default_avatar.webp') }}'" alt="Аватар {{ user.display_name }}">
         </div>
         <div class="col-md">
             <h2 class="mb-0">{{ user.display_name }}
@@ -11,10 +11,10 @@
             </h2>
             <p class="text-muted mb-2">@{{ user.login }}</p>
             <p class="mb-2">{{ user.bio or 'Описание отсутствует' }}</p>
-            {% if current_user.is_authenticated and current_user.id == user.id %}
+            {% if current_user and current_user.id == user.id %}
             <a href="{{ url_for('settings') }}" class="btn btn-outline-neon btn-sm">Редактировать профиль</a>
             {% endif %}
-            {% if current_user.is_authenticated and current_user.is_admin and current_user.id != user.id %}
+            {% if current_user and current_user.is_admin and current_user.id != user.id %}
             <button class="btn btn-outline-danger btn-sm" onclick="toggleAdmin('{{ user.user_dir_id }}')">
                 {% if user.is_admin %}Снять админа{% else %}Назначить админом{% endif %}
             </button>
@@ -37,16 +37,22 @@
 
 <div class="tab-content" id="profileTabsContent">
     <div class="tab-pane fade show active" id="tracks" role="tabpanel">
-        {% if tracks %}
-        <div class="row">
-            {% for track in tracks %}
+        <div class="d-flex justify-content-end mb-3">
+            <select id="track-sort" class="form-select w-auto" style="background-color: #12121f; color: white; border-color: #222236; cursor: pointer;">
+                <option value="new" selected>Новые</option>
+                <option value="popular">Популярные</option>
+                <option value="old">Старые</option>
+            </select>
+        </div>
+        
+        <div class="row" id="tracks-grid">
+            {% for track in tracks.items %}
                 {% include '_track_card.html' %}
             {% endfor %}
         </div>
-        {% else %}
-        <p class="text-muted">Нет треков</p>
-        {% endif %}
+        <div id="infinite-sentinel" style="height: 20px;"></div>
     </div>
+    
     <div class="tab-pane fade" id="playlists" role="tabpanel">
         {% if playlists %}
         <div class="row">
@@ -66,6 +72,7 @@
         <p class="text-muted">Нет плейлистов</p>
         {% endif %}
     </div>
+    
     <div class="tab-pane fade" id="stats" role="tabpanel">
         <div class="row">
             <div class="col-md-4">
@@ -93,15 +100,65 @@
 
 {% block scripts %}
 <script>
-(function () {
+    let observerInstance = null;
+
+    function loadTracks(sortType) {
+        if (observerInstance) observerInstance.disconnect();
+        const grid = document.getElementById('tracks-grid');
+        const sentinel = document.getElementById('infinite-sentinel');
+        if (!grid || !sentinel) return;
+
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMore = true;
+
+        grid.innerHTML = '<div class="col-12 text-center my-5 w-100"><i class="fas fa-spinner fa-spin fa-2x" style="color: var(--neon);"></i></div>';
+
+        function fetchPage(page) {
+            return fetch(`/api/web/tracks?page=${page}&per_page=20&sort=${sortType}&user_dir_id={{ user.user_dir_id }}`)
+                .then(res => {
+                    hasMore = res.headers.get('X-Has-More') === 'true';
+                    return res.text();
+                });
+        }
+
+        fetchPage(1).then(html => {
+            grid.innerHTML = html;
+        }).catch(() => {
+            grid.innerHTML = '<div class="col-12 text-center my-5 w-100 text-danger">Ошибка загрузки</div>';
+        });
+
+        observerInstance = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !isLoading && hasMore) {
+                isLoading = true;
+                currentPage++;
+                fetchPage(currentPage).then(html => {
+                    if (html.trim() === '') hasMore = false;
+                    else grid.insertAdjacentHTML('beforeend', html);
+                    isLoading = false;
+                }).catch(() => { isLoading = false; });
+            }
+        }, { rootMargin: '300px' });
+
+        observerInstance.observe(sentinel);
+        window.PageCleanup = () => { if(observerInstance) observerInstance.disconnect(); };
+    }
+
+    document.getElementById('track-sort').addEventListener('change', (e) => {
+        loadTracks(e.target.value);
+    });
+
+    if (document.getElementById('tracks-grid').children.length > 0) {
+        loadTracks('new');
+    }
+
     async function toggleAdmin(userDirId) {
         if (!confirm('Вы уверены?')) return;
-        const resp = await fetch('/api/admin/toggle/' + userDirId, {method: 'POST'});
+        const resp = await fetch('/api/v1/admin/toggle/' + userDirId, {method: 'POST'});
         const data = await resp.json();
         if (data.status === 'ok') location.reload();
         else alert('Ошибка: ' + (data.error || ''));
     }
     window.toggleAdmin = toggleAdmin;
-})();
 </script>
 {% endblock %}

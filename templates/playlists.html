@@ -54,7 +54,7 @@
     }
 
     async function openPlaylistModal(playlistDirId) {
-        const resp = await fetch('/api/playlist/' + playlistDirId + '/tracks');
+        const resp = await fetch('/api/v1/playlists/' + playlistDirId + '/tracks');
         const data = await resp.json();
         if (data.error) { alert('Ошибка доступа'); return; }
         document.getElementById('modalPlaylistName').textContent = data.playlist_name;
@@ -117,7 +117,7 @@
 
     async function deleteTrack(playlistDirId, trackDirId, btn) {
         if (!confirm('Удалить трек из плейлиста?')) return;
-        const r = await fetch('/playlist/' + playlistDirId + '/remove/' + trackDirId, { method: 'POST' });
+        const r = await fetch('/api/v1/playlists/' + playlistDirId + '/tracks/' + trackDirId, { method: 'DELETE' });
         const data = await r.json();
         if (data.status === 'ok') {
             const card = btn.closest('[data-track-id]');

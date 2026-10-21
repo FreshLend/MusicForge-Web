@@ -56,7 +56,7 @@
                         <button class="btn-rating dislike-btn" id="dislikeBtn" onclick="rateCurrent(-1)"><i class="fas fa-thumbs-down"></i> <span id="dislikesCount">0</span></button>
                         <button class="btn-rating" id="favBtn" onclick="toggleFavorite()" title="Избранное"><i class="far fa-heart"></i></button>
                         <button class="btn-rating" id="subtitlesToggle" title="Субтитры" disabled style="opacity:0.5;pointer-events:none;"><i class="fas fa-closed-captioning"></i></button>
-                        {% if current_user.is_authenticated %}
+                        {% if current_user %}
                         <div class="dropdown d-inline">
                             <button class="btn-rating" data-bs-toggle="dropdown" title="Добавить в плейлист"><i class="fas fa-plus-circle"></i></button>
                             <ul class="dropdown-menu custom-dropdown" id="playlistDropdown">
@@ -420,7 +420,7 @@
 
     async function updateTrackStatus(trackDirId) {
         try {
-            const resp = await fetch('/api/track/' + trackDirId + '/status');
+            const resp = await fetch('/api/v1/tracks/' + trackDirId + '/status');
             const data = await resp.json();
             document.getElementById('favBtn').innerHTML = data.is_favorite ? '<i class="fas fa-heart"></i>' : '<i class="far fa-heart"></i>';
             document.getElementById('likesCount').textContent = formatCount(data.likes);
@@ -449,7 +449,7 @@
     window.rateCurrent = async function (value) {
         const t = tracks[localIndex];
         if (!t) return;
-        const resp = await fetch('/api/rate/' + t.id, {
+        const resp = await fetch('/api/v1/tracks/' + t.id + '/rate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'value=' + value
@@ -467,26 +467,30 @@
     window.toggleFavorite = async function () {
         const t = tracks[localIndex];
         if (!t) return;
-        const resp = await fetch('/favorite/toggle/' + t.id, { method: 'POST' });
+        const resp = await fetch('/api/v1/tracks/' + t.id + '/favorite', { method: 'POST' });
         const data = await resp.json();
         document.getElementById('favBtn').innerHTML = (data.status === 'added' ? '<i class="fas fa-heart"></i>' : '<i class="far fa-heart"></i>');
     };
     window.togglePlaylistTrack = async function (plDirId) {
         const t = tracks[localIndex];
         if (!t) return;
-        const resp = await fetch('/playlist/' + plDirId + '/add/' + t.id, { method: 'POST' });
+        const resp = await fetch('/api/v1/playlists/' + plDirId + '/tracks', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_dir_id: t.id })
+        });
         const data = await resp.json();
         const item = document.querySelector('#playlistDropdown .playlist-item[data-playlist-id="' + plDirId + '"] i');
         if (item) item.style.display = (data.status === 'added') ? 'inline-block' : 'none';
     };
     {% if is_owner %}
     window.togglePublic = function () {
-        fetch('/playlist/' + PLAYLIST_ID + '/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'is_public=' + {{ 'false' if playlist.is_public else 'true' }}
+        fetch('/api/v1/playlists/' + PLAYLIST_ID, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_public: {{ 'false' if playlist.is_public else 'true' }} })
         }).then(function (r) { return r.json(); }).then(function (data) {
-            if (data.status === 'ok') window.location.reload();
+            if (data.ok) window.location.reload();
         });
     };
     {% endif %}
@@ -544,7 +548,7 @@
             if (found) newTracks.push(found);
         });
         tracks = newTracks;
-        fetch('/api/playlist/' + PLAYLIST_ID + '/reorder', {
+        fetch('/api/v1/playlists/' + PLAYLIST_ID + '/reorder', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order: newOrder })

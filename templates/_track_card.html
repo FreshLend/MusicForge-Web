@@ -1,6 +1,18 @@
 <div class="col-md-3 col-sm-6 mb-3">
     <div class="track-card" onclick="location.href='{{ url_for('track', track_dir_id=track.track_dir_id) }}'">
-        <img src="{{ url_for('static', filename='users/' + track.uploader.user_dir_id + '/music/' + track.track_dir_id + '/' + track.track_dir_id + '.webp') }}" alt="Cover" onerror="this.src='{{ url_for('static', filename='default_cover.webp') }}'">
+        {% set is_first = false %}
+        {% if priority is defined and priority %}
+            {% set is_first = true %}
+        {% elif loop is defined and loop.index == 1 %}
+            {% set is_first = true %}
+        {% endif %}
+
+        {% if is_first %}
+        <img src="{{ url_for('static', filename='users/' + track.uploader.user_dir_id + '/music/' + track.track_dir_id + '/' + track.track_dir_id + '.webp') }}" alt="Обложка трека {{ track.title }}" fetchpriority="high" loading="eager" onerror="this.src='{{ url_for('static', filename='default_cover.webp') }}'">
+        {% else %}
+        <img src="{{ url_for('static', filename='users/' + track.uploader.user_dir_id + '/music/' + track.track_dir_id + '/' + track.track_dir_id + '.webp') }}" alt="Обложка трека {{ track.title }}" loading="lazy" onerror="this.src='{{ url_for('static', filename='default_cover.webp') }}'">
+        {% endif %}
+        
         <div class="play-overlay"><i class="fas fa-play-circle"></i></div>
         <div class="card-body">
             <div class="card-title">{{ track.title }}</div>

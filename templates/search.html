@@ -2,12 +2,21 @@
 {% block content %}
 <h2 class="mb-4">Результаты поиска по "{{ query }}"</h2>
 {% if tracks %}
-<div class="row">
+<div class="row" id="tracks-grid">
     {% for track in tracks %}
         {% include '_track_card.html' %}
     {% endfor %}
 </div>
+<div id="infinite-sentinel" style="height: 20px;"></div>
 {% else %}
 <p class="text-muted">Ничего не найдено</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if tracks %}
+<script>
+    window.initInfiniteScroll('tracks-grid', 'infinite-sentinel', '/api/web/tracks', 'new', '{{ query }}');
+</script>
 {% endif %}
 {% endblock %}
