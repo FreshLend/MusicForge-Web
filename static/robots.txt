@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /
+Allow: /static/
+Allow: /track/
+Allow: /user/
+Allow: /playlist/
+Allow: /releases
+Allow: /all_new
+Allow: /all_chart
+
+Disallow: /api/
+Disallow: /auth/
+Disallow: /settings
+Disallow: /upload
+Disallow: /login
+Disallow: /register
+Disallow: /history
+Disallow: /favorites
+Disallow: /widgets
+Disallow: /search?*
+Disallow: /advanced_search?*
+
+Sitemap: https://musicforge.de5.net/sitemap.xml
