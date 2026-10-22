@@ -35,6 +35,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import or_, desc, func, and_, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import selectinload
 from PIL import Image
 
 from models import (
@@ -1190,6 +1191,8 @@ class UserLoaderMiddleware(BaseHTTPMiddleware):
             request.state.api_user = await run_in_threadpool(_get_api_user, request)
         except Exception:
             request.state.api_user = None
+        if request.state.current_user is None and request.state.api_user is not None:
+            request.state.current_user = request.state.api_user
         return await call_next(request)
 
 class HeadersMiddleware(BaseHTTPMiddleware):
@@ -1354,11 +1357,13 @@ def serve_sitemap():
 @app.get('/', name='index')
 def index(request: Request):
     week_ago = utcnow() - timedelta(days=7)
-    new_releases = Track.query.filter(Track.uploaded_at >= week_ago) \
+    new_releases = Track.query.options(selectinload(Track.uploader)) \
+        .filter(Track.uploaded_at >= week_ago) \
         .order_by(Track.uploaded_at.desc()).limit(8).all()
     month_ago = utcnow() - timedelta(days=30)
     popular = db.session.query(Track, func.count(ListenEvent.id).label('cnt')) \
         .join(ListenEvent, ListenEvent.track_id == Track.id) \
+        .options(selectinload(Track.uploader)) \
         .filter(ListenEvent.listened_at >= month_ago) \
         .group_by(Track.id).order_by(desc('cnt')).limit(8).all()
     cu = getattr(request.state, 'current_user', None)
@@ -2244,11 +2249,12 @@ def api_update_me(request: Request, user: User = Depends(require_api_user),
     return _json_ok(serialize_user(user, include_stats=True))
 
 @api_v1.get('/tracks')
-def api_list_tracks(request: Request):
+def api_list_tracks(request: Request, response: Response):
+    response.headers['Cache-Control'] = 'public, max-age=20, stale-while-revalidate=40'
     page = int(request.query_params.get('page', 1))
     pp = min(int(request.query_params.get('per_page', 20)), 100)
     sort = request.query_params.get('sort', 'new')
-    q = Track.query
+    q = Track.query.options(selectinload(Track.uploader))
     if sort == 'popular':
         q = q.order_by(Track.play_count.desc())
     elif sort == 'likes':
@@ -2488,7 +2494,7 @@ def api_track_status(request: Request, track_dir_id: str, user: User = Depends(r
 @api_v1.post('/tracks/{track_dir_id}/rate')
 @rl('60/minute')
 def api_rate_track(request: Request, track_dir_id: str, user: User = Depends(require_user),
-                   value: int = Form(...)):
+                   value: int = Body(..., embed=True)):
     t = first_or_404(Track.query.filter_by(track_dir_id=track_dir_id))
     if value not in (1, -1):
         return JSONResponse({'error': 'Invalid value'}, status_code=400)
@@ -2574,20 +2580,24 @@ def api_recommendations(request: Request):
     return _json_ok({'items': [serialize_track(t) for t in get_recommendations(api_user, limit)]})
 
 @api_v1.get('/charts')
-def api_charts(request: Request):
+def api_charts(request: Request, response: Response):
+    response.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=120'
     days = int(request.query_params.get('period', 30))
     limit = min(int(request.query_params.get('limit', 50)), 200)
     rows = db.session.query(Track, func.count(ListenEvent.id).label('cnt')) \
         .join(ListenEvent, ListenEvent.track_id == Track.id) \
+        .options(selectinload(Track.uploader)) \
         .filter(ListenEvent.listened_at >= utcnow() - timedelta(days=days)) \
         .group_by(Track.id).order_by(desc('cnt')).limit(limit).all()
     return _json_ok({'period_days': days, 'items': [serialize_track(r[0]) for r in rows]})
 
 @api_v1.get('/new-releases')
-def api_new_releases(request: Request):
+def api_new_releases(request: Request, response: Response):
+    response.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=120'
     days = int(request.query_params.get('days', 7))
     limit = min(int(request.query_params.get('limit', 20)), 100)
-    rows = Track.query.filter(Track.uploaded_at >= utcnow() - timedelta(days=days)) \
+    rows = Track.query.options(selectinload(Track.uploader)) \
+        .filter(Track.uploaded_at >= utcnow() - timedelta(days=days)) \
         .order_by(Track.uploaded_at.desc()).limit(limit).all()
     return _json_ok({'items': [serialize_track(t) for t in rows]})
 
@@ -2663,8 +2673,17 @@ def api_user_tracks(request: Request, user_dir_id: str):
         return _json_error('not_found', 'User not found', 404)
     page = int(request.query_params.get('page', 1))
     pp = min(int(request.query_params.get('per_page', 20)), 100)
-    q = Track.query.filter_by(uploader_id=u.id)
-    pg = q.order_by(Track.uploaded_at.desc()).paginate(page=page, per_page=pp, error_out=False)
+    sort = request.query_params.get('sort', 'new')
+    
+    q = Track.query.options(selectinload(Track.uploader)).filter_by(uploader_id=u.id)
+    if sort == 'popular':
+        q = q.order_by(Track.play_count.desc())
+    elif sort == 'old':
+        q = q.order_by(Track.uploaded_at.asc())
+    else:
+        q = q.order_by(Track.uploaded_at.desc())
+        
+    pg = q.paginate(page=page, per_page=pp, error_out=False)
     return _json_ok({'items': [serialize_track(t) for t in pg.items],
                      'page': pg.page, 'per_page': pg.per_page,
                      'total': pg.total, 'pages': pg.pages})
@@ -2683,29 +2702,78 @@ def api_user_playlists(request: Request, user_dir_id: str):
 
 @api_v1.get('/favorites')
 def api_favorites(request: Request, user: User = Depends(require_api_user)):
-    favs = Favorite.query.filter_by(user_id=user.id).order_by(Favorite.created_at.desc()).all()
-    tracks = [db.session.get(Track, f.track_id) for f in favs]
-    return _json_ok({'items': [serialize_track(t) for t in tracks if t]})
+    page = int(request.query_params.get('page', 1))
+    pp = min(int(request.query_params.get('per_page', 50)), 100)
+    
+    q = Favorite.query.filter_by(user_id=user.id).order_by(Favorite.created_at.desc())
+    pg = q.paginate(page=page, per_page=pp, error_out=False)
+    
+    track_ids = [f.track_id for f in pg.items]
+    tracks_map = {}
+    if track_ids:
+        tracks = Track.query.options(selectinload(Track.uploader)).filter(Track.id.in_(track_ids)).all()
+        tracks_map = {t.id: t for t in tracks}
+        
+    items = [tracks_map[tid] for tid in track_ids if tid in tracks_map]
+    return _json_ok({
+        'items': [serialize_track(t) for t in items],
+        'page': pg.page, 'per_page': pg.per_page,
+        'total': pg.total, 'pages': pg.pages
+    })
+
+@api_v1.api_route('/tracks/{track_dir_id}/favorite', methods=['POST', 'DELETE'])
+def api_favorite(request: Request, track_dir_id: str, user: User = Depends(require_user)):
+    t = Track.query.filter_by(track_dir_id=track_dir_id).first()
+    if not t:
+        return _json_error('not_found', 'Track not found', 404)
+    fav = Favorite.query.filter_by(user_id=user.id, track_id=t.id).first()
+    if request.method == 'DELETE':
+        if fav:
+            db.session.delete(fav)
+            commit_with_retry()
+        return _json_ok({'is_favorite': False})
+    if not fav:
+        db.session.add(Favorite(user_id=user.id, track_id=t.id))
+        commit_with_retry()
+    return _json_ok({'is_favorite': True})
 
 @api_v1.get('/history')
 def api_history(request: Request, user: User = Depends(require_api_user)):
+    page = int(request.query_params.get('page', 1))
+    pp = min(int(request.query_params.get('per_page', 50)), 100)
+    
     subq = db.session.query(
         ListeningHistory.track_id,
         func.max(ListeningHistory.listened_at).label('max_time')
     ).filter_by(user_id=user.id).group_by(ListeningHistory.track_id).subquery()
-    rows = db.session.query(ListeningHistory).join(
+    
+    q = db.session.query(ListeningHistory).join(
         subq, and_(ListeningHistory.track_id == subq.c.track_id,
                    ListeningHistory.listened_at == subq.c.max_time)) \
         .filter(ListeningHistory.user_id == user.id) \
-        .order_by(desc(subq.c.max_time)).all()
+        .order_by(desc(subq.c.max_time))
+        
+    pg = q.paginate(page=page, per_page=pp, error_out=False)
+    
+    track_ids = [row.track_id for row in pg.items]
+    tracks_map = {}
+    if track_ids:
+        tracks = Track.query.options(selectinload(Track.uploader)).filter(Track.id.in_(track_ids)).all()
+        tracks_map = {t.id: t for t in tracks}
+        
     items = []
-    for row in rows:
-        t = db.session.get(Track, row.track_id)
+    for row in pg.items:
+        t = tracks_map.get(row.track_id)
         if t:
             items.append({'track': serialize_track(t),
                           'listened_at': row.listened_at.isoformat() if row.listened_at else None,
                           'count': row.count})
-    return _json_ok({'items': items})
+                          
+    return _json_ok({
+        'items': items,
+        'page': pg.page, 'per_page': pg.per_page,
+        'total': pg.total, 'pages': pg.pages
+    })
 
 @api_v1.delete('/history/{track_dir_id}')
 def api_history_delete(request: Request, track_dir_id: str, user: User = Depends(require_api_user)):
@@ -2777,21 +2845,23 @@ def api_playlist_tracks(request: Request, playlist_dir_id: str, user: User = Dep
     } for t in tracks], 'playlist_name': pl.name, 'playlist_dir_id': pl.playlist_dir_id})
 
 @api_v1.post('/playlists/{playlist_dir_id}/tracks')
-def api_playlist_add_track(request: Request, playlist_dir_id: str,
-                           user: User = Depends(require_user), track_dir_id: str = Body(..., embed=True)):
-    pl = first_or_404(Playlist.query.filter_by(playlist_dir_id=playlist_dir_id))
-    t = first_or_404(Track.query.filter_by(track_dir_id=track_dir_id))
+def api_playlist_add_track(request: Request, playlist_dir_id: str, user: User = Depends(require_user), data: dict = Body(...)):
+    pl = Playlist.query.filter_by(playlist_dir_id=playlist_dir_id).first()
+    if not pl:
+        return _json_error('not_found', 'Playlist not found', 404)
     if pl.user_id != user.id and not user.is_admin:
-        return JSONResponse({'error': 'Access denied'}, status_code=403)
-    ex = PlaylistTrack.query.filter_by(playlist_id=pl.id, track_id=t.id).first()
-    if ex:
-        db.session.delete(ex)
+        return _json_error('forbidden', 'Access denied', 403)
+    td = data.get('track_id') or data.get('track_dir_id')
+    if not td:
+        return _json_error('bad_request', 'track_id required')
+    t = Track.query.filter_by(track_dir_id=td).first()
+    if not t:
+        return _json_error('not_found', 'Track not found', 404)
+    if not PlaylistTrack.query.filter_by(playlist_id=pl.id, track_id=t.id).first():
+        mp = db.session.query(func.max(PlaylistTrack.position)).filter_by(playlist_id=pl.id).scalar() or 0
+        db.session.add(PlaylistTrack(playlist_id=pl.id, track_id=t.id, position=mp + 1))
         commit_with_retry()
-        return JSONResponse({'status': 'removed'})
-    maxpos = db.session.query(func.max(PlaylistTrack.position)).filter_by(playlist_id=pl.id).scalar() or 0
-    db.session.add(PlaylistTrack(playlist_id=pl.id, track_id=t.id, position=maxpos + 1))
-    commit_with_retry()
-    return JSONResponse({'status': 'added'})
+    return _json_ok({'track_count': pl.tracks.count()})
 
 @api_v1.delete('/playlists/{playlist_dir_id}/tracks/{track_dir_id}')
 def api_playlist_remove_track(request: Request, playlist_dir_id: str, track_dir_id: str,
