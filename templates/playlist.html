@@ -421,6 +421,7 @@
     async function updateTrackStatus(trackDirId) {
         try {
             const resp = await fetch('/api/v1/tracks/' + trackDirId + '/status');
+            if (!resp.ok) return;
             const data = await resp.json();
             document.getElementById('favBtn').innerHTML = data.is_favorite ? '<i class="fas fa-heart"></i>' : '<i class="far fa-heart"></i>';
             document.getElementById('likesCount').textContent = formatCount(data.likes);
@@ -432,11 +433,11 @@
             else if (data.user_rating === -1) { dislikeBtn.classList.add('active'); likeBtn.classList.remove('active'); }
             else { likeBtn.classList.remove('active'); dislikeBtn.classList.remove('active'); }
             const items = document.querySelectorAll('#playlistDropdown .playlist-item');
+            const ids = data.playlist_ids || [];
             items.forEach(function (item) {
                 const plId = item.getAttribute('data-playlist-id');
                 const icon = item.querySelector('i');
-                const ids = (data.playlist_ids || []).map(Number);
-                icon.style.display = ids.includes(Number(plId)) ? 'inline-block' : 'none';
+                if (icon) icon.style.display = ids.indexOf(plId) >= 0 ? 'inline-block' : 'none';
             });
         } catch (e) {}
     }
@@ -451,11 +452,12 @@
         if (!t) return;
         const resp = await fetch('/api/v1/tracks/' + t.id + '/rate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'value=' + value
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: value })
         });
+        if (!resp.ok) return;
         const data = await resp.json();
-        if (data.error) return;
+        if (typeof data.likes === 'undefined') return;
         document.getElementById('likesCount').textContent = formatCount(data.likes);
         document.getElementById('dislikesCount').textContent = formatCount(data.dislikes);
         const likeBtn = document.getElementById('likeBtn');
@@ -468,20 +470,27 @@
         const t = tracks[localIndex];
         if (!t) return;
         const resp = await fetch('/api/v1/tracks/' + t.id + '/favorite', { method: 'POST' });
+        if (!resp.ok) return;
         const data = await resp.json();
         document.getElementById('favBtn').innerHTML = (data.status === 'added' ? '<i class="fas fa-heart"></i>' : '<i class="far fa-heart"></i>');
     };
     window.togglePlaylistTrack = async function (plDirId) {
         const t = tracks[localIndex];
         if (!t) return;
-        const resp = await fetch('/api/v1/playlists/' + plDirId + '/tracks', { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ track_dir_id: t.id })
-        });
-        const data = await resp.json();
         const item = document.querySelector('#playlistDropdown .playlist-item[data-playlist-id="' + plDirId + '"] i');
-        if (item) item.style.display = (data.status === 'added') ? 'inline-block' : 'none';
+        if (!item) return;
+        const isInPlaylist = item.style.display !== 'none';
+        let resp;
+        if (isInPlaylist) {
+            resp = await fetch('/api/v1/playlists/' + plDirId + '/tracks/' + t.id, { method: 'DELETE' });
+        } else {
+            resp = await fetch('/api/v1/playlists/' + plDirId + '/tracks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_dir_id: t.id })
+            });
+        }
+        if (resp.ok) item.style.display = isInPlaylist ? 'none' : 'inline-block';
     };
     {% if is_owner %}
     window.togglePublic = function () {

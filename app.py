@@ -60,8 +60,12 @@ _main_loop = None
 
 def generate_desktop_code(user_id):
     code = secrets.token_urlsafe(32)
+    now = time.time()
     with _codes_lock:
-        _desktop_codes[code] = (user_id, time.time())
+        expired = [c for c, (_, ts) in _desktop_codes.items() if now - ts > 60]
+        for c in expired:
+            _desktop_codes.pop(c, None)
+        _desktop_codes[code] = (user_id, now)
     return code
 
 def _load_or_create_secret():
@@ -309,6 +313,14 @@ def safe_replace(src, dst):
         return False
 
 def save_upload_to(upload: UploadFile, dst_path: str):
+    try:
+        upload.file.seek(0, os.SEEK_END)
+        size = upload.file.tell()
+        upload.file.seek(0)
+    except Exception:
+        size = 0
+    if size > MAX_UPLOAD_MB * 1024 * 1024:
+        raise ValueError(f'Файл слишком большой (макс. {MAX_UPLOAD_MB} МБ)')
     with open(dst_path, 'wb') as f:
         shutil.copyfileobj(upload.file, f)
 
@@ -1131,7 +1143,7 @@ class SessionCSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return await call_next(request)
-            
+
         path = request.url.path
         if path.startswith('/api/v1/'):
             return await call_next(request)
@@ -1172,7 +1184,7 @@ class SessionCSRFMiddleware(BaseHTTPMiddleware):
                 return _json_error('csrf', 'CSRF token missing or invalid', 400)
             flash(request, 'Ошибка безопасности (CSRF). Попробуйте снова.', 'danger')
             return RedirectResponse(str(request.app.url_path_for('index')), status_code=302)
-            
+
         return await call_next(request)
 
 class UserLoaderMiddleware(BaseHTTPMiddleware):
@@ -1197,24 +1209,9 @@ class UserLoaderMiddleware(BaseHTTPMiddleware):
 
 class HeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method == 'OPTIONS' and request.url.path.startswith('/api/'):
-            return Response(status_code=204)
         response = await call_next(request)
-        
         if request.url.path.startswith('/static/'):
             response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-
-        if request.url.path.startswith('/api/'):
-            origin = request.headers.get('origin', '')
-            if ALLOWED_ORIGINS:
-                if origin in ALLOWED_ORIGINS:
-                    response.headers['Access-Control-Allow-Origin'] = origin
-                    response.headers['Vary'] = 'Origin'
-            else:
-                response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type, X-CSRFToken'
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Max-Age'] = '86400'
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -1222,35 +1219,34 @@ class HeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 def generate_sitemap_sync():
-    import uuid
     _db_token.set(uuid.uuid4())
     try:
-        base_url = os.environ.get('SITE_URL', 'https://musicforge.de5.net')
+        base_url = os.environ.get('SITE_URL', 'https://127.0.0.1:5000')
         urls = [f"{base_url}/", f"{base_url}/releases"]
-        
+
         tracks = Track.query.order_by(Track.uploaded_at.desc()).limit(2000).all()
         for t in tracks:
             urls.append(f"{base_url}/track/{t.track_dir_id}")
-            
+
         users = User.query.limit(1000).all()
         for u in users:
             urls.append(f"{base_url}/user/{u.user_dir_id}")
-            
+
         playlists = Playlist.query.filter_by(is_public=True).limit(1000).all()
         for pl in playlists:
             urls.append(f"{base_url}/playlist/{pl.playlist_dir_id}")
-            
+
         xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
         xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         for url in urls:
             xml += f'  <url><loc>{url}</loc></url>\n'
         xml += '</urlset>'
-        
+
         os.makedirs('static', exist_ok=True)
         sitemap_path = os.path.join('static', 'sitemap.xml')
         with open(sitemap_path, 'w', encoding='utf-8') as f:
             f.write(xml)
-            
+
         log.info(f"[SITEMAP] Успешно обновлен. Ссылок: {len(urls)}")
     except Exception as e:
         log.error(f"[SITEMAP] Ошибка генерации: {e}")
@@ -1267,23 +1263,23 @@ async def sitemap_worker():
 async def lifespan(app_: FastAPI):
     global _main_loop
     _main_loop = asyncio.get_running_loop()
-    
+
     os.makedirs('static', exist_ok=True)
     os.makedirs(BASE_USER_DIR, exist_ok=True)
     try:
         db.create_all()
     except Exception as e:
         log.warning(f'create_all failed: {e}')
-        
+
     default_cover = os.path.join('static', 'default_cover.webp')
     if not os.path.exists(default_cover):
         try:
             Image.new('RGB', (512, 512), color='#2a2a3a').save(default_cover, 'webp')
         except Exception:
             pass
-            
+
     asyncio.create_task(sitemap_worker())
-    
+
     yield
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -1295,11 +1291,12 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, session_cookie='ses
                    max_age=7 * 24 * 3600, same_site='lax', https_only=COOKIE_SECURE)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if not ALLOWED_ORIGINS else list(ALLOWED_ORIGINS),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(ALLOWED_ORIGINS) if ALLOWED_ORIGINS else ['*'],
+    allow_credentials=bool(ALLOWED_ORIGINS),
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
+app.add_middleware(HeadersMiddleware)
 
 app.mount('/static', StaticFiles(directory='static'), name='static')
 templates = Jinja2Templates(directory='templates')
@@ -1333,26 +1330,18 @@ def favicon():
 def serve_robots():
     file_path = os.path.join('static', 'robots.txt')
     if os.path.exists(file_path):
-        return FileResponse(
-            file_path,
-            media_type='text/plain',
-            headers={'Cache-Control': 'public, max-age=86400'}
-        )
-    return PlainTextResponse(
-        "User-agent: *\nDisallow: /",
-        headers={'Cache-Control': 'public, max-age=86400'}
-    )
+        return FileResponse(file_path, media_type='text/plain',
+                            headers={'Cache-Control': 'public, max-age=86400'})
+    return PlainTextResponse("User-agent: *\nDisallow: /",
+                             headers={'Cache-Control': 'public, max-age=86400'})
 
 @app.get('/sitemap.xml')
 def serve_sitemap():
     sitemap_path = os.path.join('static', 'sitemap.xml')
     if not os.path.exists(sitemap_path):
         return Response("Sitemap not generated yet", status_code=404)
-    return FileResponse(
-        sitemap_path,
-        media_type='application/xml',
-        headers={'Cache-Control': 'public, max-age=3600'}
-    )
+    return FileResponse(sitemap_path, media_type='application/xml',
+                        headers={'Cache-Control': 'public, max-age=3600'})
 
 @app.get('/', name='index')
 def index(request: Request):
@@ -1493,7 +1482,11 @@ def edit_track(request: Request, track_dir_id: str, user: User = Depends(require
             if is_video_file(cover_file.filename):
                 ext = cover_file.filename.rsplit('.', 1)[1].lower()
                 tmp = os.path.join(track_dir, f'_tmp_{uuid.uuid4().hex}.{ext}')
-                save_upload_to(cover_file, tmp)
+                try:
+                    save_upload_to(cover_file, tmp)
+                except ValueError as e:
+                    flash(request, str(e), 'danger')
+                    return RedirectResponse(str(request.app.url_path_for('edit_track', track_dir_id=t.track_dir_id)), status_code=302)
                 try:
                     convert_video_to_cover(tmp, t, make_poster=True)
                 except Exception as e:
@@ -1510,7 +1503,11 @@ def edit_track(request: Request, track_dir_id: str, user: User = Depends(require
         if cover_video_file and cover_video_file.filename and is_video_file(cover_video_file.filename):
             ext = cover_video_file.filename.rsplit('.', 1)[1].lower()
             tmp = os.path.join(track_dir, f'_tmp_{uuid.uuid4().hex}.{ext}')
-            save_upload_to(cover_video_file, tmp)
+            try:
+                save_upload_to(cover_video_file, tmp)
+            except ValueError as e:
+                flash(request, str(e), 'danger')
+                return RedirectResponse(str(request.app.url_path_for('edit_track', track_dir_id=t.track_dir_id)), status_code=302)
             try:
                 convert_video_to_cover(tmp, t, make_poster=False)
             except Exception as e:
@@ -1699,7 +1696,14 @@ def upload(request: Request, user: User = Depends(require_user),
         td = get_track_dir(t)
         os.makedirs(td, exist_ok=True)
         audio_path = get_audio_path(t)
-        save_upload_to(audio_file, audio_path)
+        try:
+            save_upload_to(audio_file, audio_path)
+        except ValueError as e:
+            db.session.delete(t)
+            commit_with_retry()
+            safe_rmtree(td)
+            flash(request, str(e), 'danger')
+            return render(request, 'upload.html')
         sniffed = sniff_audio(audio_path)
         if not sniffed:
             db.session.delete(t)
@@ -1712,7 +1716,14 @@ def upload(request: Request, user: User = Depends(require_user),
             if is_video_file(cover_file.filename):
                 ext = cover_file.filename.rsplit('.', 1)[1].lower()
                 tmp = os.path.join(td, f'_tmp_{uuid.uuid4().hex}.{ext}')
-                save_upload_to(cover_file, tmp)
+                try:
+                    save_upload_to(cover_file, tmp)
+                except ValueError as e:
+                    db.session.delete(t)
+                    commit_with_retry()
+                    safe_rmtree(td)
+                    flash(request, str(e), 'danger')
+                    return render(request, 'upload.html')
                 try:
                     convert_video_to_cover(tmp, t, make_poster=True)
                 except Exception as e:
@@ -1735,7 +1746,14 @@ def upload(request: Request, user: User = Depends(require_user),
         if cover_video_file and cover_video_file.filename and is_video_file(cover_video_file.filename):
             ext = cover_video_file.filename.rsplit('.', 1)[1].lower()
             tmp = os.path.join(td, f'_tmp_{uuid.uuid4().hex}.{ext}')
-            save_upload_to(cover_video_file, tmp)
+            try:
+                save_upload_to(cover_video_file, tmp)
+            except ValueError as e:
+                db.session.delete(t)
+                commit_with_retry()
+                safe_rmtree(td)
+                flash(request, str(e), 'danger')
+                return render(request, 'upload.html')
             try:
                 convert_video_to_cover(tmp, t, make_poster=False)
             except Exception as e:
@@ -2021,6 +2039,15 @@ def oauth_start(request: Request, provider: str):
     if provider not in OAUTH_PROVIDERS:
         flash(request, 'OAuth провайдер не настроен', 'danger')
         return RedirectResponse(str(request.app.url_path_for('login')), status_code=302)
+    link_mode = request.query_params.get('link') == '1'
+    cu = getattr(request.state, 'current_user', None)
+    if link_mode:
+        if not cu:
+            flash(request, 'Войдите, чтобы привязать аккаунт', 'danger')
+            return RedirectResponse(str(request.app.url_path_for('login')), status_code=302)
+        request.session['oauth_link_user_id'] = cu.id
+    else:
+        request.session.pop('oauth_link_user_id', None)
     cfg = OAUTH_PROVIDERS[provider]
     state = secrets.token_urlsafe(24)
     request.session['oauth_state'] = state
@@ -2052,6 +2079,7 @@ def oauth_callback(request: Request, provider: str):
         return RedirectResponse(str(request.app.url_path_for('login')), status_code=302)
     state = request.query_params.get('state', '')
     expected = request.session.pop('oauth_state', None)
+    link_user_id = request.session.pop('oauth_link_user_id', None)
     if not expected or state != expected:
         flash(request, 'Неверный state OAuth', 'danger')
         return RedirectResponse(str(request.app.url_path_for('login')), status_code=302)
@@ -2099,10 +2127,28 @@ def oauth_callback(request: Request, provider: str):
                         break
             except Exception:
                 pass
-    if not pid or not email:
-        flash(request, 'OAuth: не удалось получить email', 'danger')
+    if not pid:
+        flash(request, 'OAuth: не удалось получить provider user id', 'danger')
         return RedirectResponse(str(request.app.url_path_for('login')), status_code=302)
     acct = OAuthAccount.query.filter_by(provider=provider, provider_user_id=pid).first()
+    if link_user_id:
+        u = db.session.get(User, link_user_id)
+        if not u:
+            flash(request, 'Пользователь не найден', 'danger')
+            return RedirectResponse(str(request.app.url_path_for('settings')), status_code=302)
+        if acct:
+            if acct.user_id == u.id:
+                flash(request, f'Аккаунт {provider} уже привязан', 'info')
+            else:
+                flash(request, f'Этот {provider} аккаунт уже привязан к другому пользователю', 'danger')
+            return RedirectResponse(str(request.app.url_path_for('settings')), status_code=302)
+        db.session.add(OAuthAccount(user_id=u.id, provider=provider, provider_user_id=pid))
+        commit_with_retry()
+        flash(request, f'Аккаунт {provider} привязан', 'success')
+        return RedirectResponse(str(request.app.url_path_for('settings')), status_code=302)
+    if not email:
+        flash(request, 'OAuth: не удалось получить email', 'danger')
+        return RedirectResponse(str(request.app.url_path_for('login')), status_code=302)
     if acct:
         u = db.session.get(User, acct.user_id)
     else:
@@ -2331,7 +2377,13 @@ def api_create_track(request: Request, user: User = Depends(require_api_user),
         td = get_track_dir(t)
         os.makedirs(td, exist_ok=True)
         ap = get_audio_path(t)
-        save_upload_to(audio_file, ap)
+        try:
+            save_upload_to(audio_file, ap)
+        except ValueError as e:
+            db.session.delete(t)
+            commit_with_retry()
+            safe_rmtree(td)
+            return _json_error('bad_request', str(e))
         sn = sniff_audio(ap)
         if not sn:
             db.session.delete(t)
@@ -2343,7 +2395,13 @@ def api_create_track(request: Request, user: User = Depends(require_api_user),
             if is_video_file(cover_file.filename):
                 ext = cover_file.filename.rsplit('.', 1)[1].lower()
                 tmp = os.path.join(td, f'_t_{uuid.uuid4().hex}.{ext}')
-                save_upload_to(cover_file, tmp)
+                try:
+                    save_upload_to(cover_file, tmp)
+                except ValueError as e:
+                    db.session.delete(t)
+                    commit_with_retry()
+                    safe_rmtree(td)
+                    return _json_error('bad_request', str(e))
                 try:
                     convert_video_to_cover(tmp, t, make_poster=True)
                 except Exception as e:
@@ -2364,7 +2422,13 @@ def api_create_track(request: Request, user: User = Depends(require_api_user),
         if cover_video_file and cover_video_file.filename and is_video_file(cover_video_file.filename):
             ext = cover_video_file.filename.rsplit('.', 1)[1].lower()
             tmp = os.path.join(td, f'_t_{uuid.uuid4().hex}.{ext}')
-            save_upload_to(cover_video_file, tmp)
+            try:
+                save_upload_to(cover_video_file, tmp)
+            except ValueError as e:
+                db.session.delete(t)
+                commit_with_retry()
+                safe_rmtree(td)
+                return _json_error('bad_request', str(e))
             try:
                 convert_video_to_cover(tmp, t, make_poster=False)
             except Exception as e:
@@ -2433,7 +2497,10 @@ def api_modify_track(request: Request, track_dir_id: str, user: User = Depends(r
         if is_video_file(cover_file.filename):
             ext = cover_file.filename.rsplit('.', 1)[1].lower()
             tmp_path = os.path.join(get_track_dir(t), f'_tmp_{uuid.uuid4().hex}.{ext}')
-            save_upload_to(cover_file, tmp_path)
+            try:
+                save_upload_to(cover_file, tmp_path)
+            except ValueError as e:
+                return _json_error('bad_request', str(e))
             try:
                 convert_video_to_cover(tmp_path, t, make_poster=True)
             except Exception as e:
@@ -2485,11 +2552,21 @@ def api_get_lyrics(track_dir_id: str):
 def api_track_status(request: Request, track_dir_id: str, user: User = Depends(require_user)):
     t = first_or_404(Track.query.filter_by(track_dir_id=track_dir_id))
     is_fav = Favorite.query.filter_by(user_id=user.id, track_id=t.id).first() is not None
-    pl_ids = [pt.playlist_id for pt in PlaylistTrack.query.filter_by(track_id=t.id).all()]
+    pl_ids = [row[0] for row in db.session.query(Playlist.playlist_dir_id).join(
+        PlaylistTrack, PlaylistTrack.playlist_id == Playlist.id
+    ).filter(
+        Playlist.user_id == user.id,
+        PlaylistTrack.track_id == t.id
+    ).all()]
     r = Rating.query.filter_by(user_id=user.id, track_id=t.id).first()
-    return JSONResponse({'is_favorite': is_fav, 'playlist_ids': pl_ids,
-                         'user_rating': r.value if r else 0,
-                         'likes': t.likes_count, 'dislikes': t.dislikes_count, 'plays': t.play_count})
+    return JSONResponse({
+        'is_favorite': is_fav,
+        'playlist_ids': pl_ids,
+        'user_rating': r.value if r else 0,
+        'likes': t.likes_count,
+        'dislikes': t.dislikes_count,
+        'plays': t.play_count,
+    })
 
 @api_v1.post('/tracks/{track_dir_id}/rate')
 @rl('60/minute')
@@ -2559,19 +2636,27 @@ def api_listen_v1(request: Request, track_dir_id: str, user: User = Depends(requ
         db.session.rollback()
         return _json_error('internal_error', 'Failed', 500)
 
-@api_v1.post('/tracks/{track_dir_id}/favorite')
+@api_v1.api_route('/tracks/{track_dir_id}/favorite', methods=['POST', 'DELETE'])
 def api_favorite(request: Request, track_dir_id: str, user: User = Depends(require_user)):
     t = Track.query.filter_by(track_dir_id=track_dir_id).first()
     if not t:
         return _json_error('not_found', 'Track not found', 404)
     fav = Favorite.query.filter_by(user_id=user.id, track_id=t.id).first()
+    if request.method == 'DELETE':
+        if fav:
+            db.session.delete(fav)
+            commit_with_retry()
+        return JSONResponse({'status': 'removed', 'ok': True, 'is_favorite': False,
+                             'data': {'is_favorite': False}})
     if fav:
         db.session.delete(fav)
         commit_with_retry()
-        return JSONResponse({'status': 'removed'})
+        return JSONResponse({'status': 'removed', 'ok': True, 'is_favorite': False,
+                             'data': {'is_favorite': False}})
     db.session.add(Favorite(user_id=user.id, track_id=t.id))
     commit_with_retry()
-    return JSONResponse({'status': 'added'})
+    return JSONResponse({'status': 'added', 'ok': True, 'is_favorite': True,
+                         'data': {'is_favorite': True}})
 
 @api_v1.get('/recommendations')
 def api_recommendations(request: Request):
@@ -2674,7 +2759,6 @@ def api_user_tracks(request: Request, user_dir_id: str):
     page = int(request.query_params.get('page', 1))
     pp = min(int(request.query_params.get('per_page', 20)), 100)
     sort = request.query_params.get('sort', 'new')
-    
     q = Track.query.options(selectinload(Track.uploader)).filter_by(uploader_id=u.id)
     if sort == 'popular':
         q = q.order_by(Track.play_count.desc())
@@ -2682,7 +2766,6 @@ def api_user_tracks(request: Request, user_dir_id: str):
         q = q.order_by(Track.uploaded_at.asc())
     else:
         q = q.order_by(Track.uploaded_at.desc())
-        
     pg = q.paginate(page=page, per_page=pp, error_out=False)
     return _json_ok({'items': [serialize_track(t) for t in pg.items],
                      'page': pg.page, 'per_page': pg.per_page,
@@ -2704,63 +2787,37 @@ def api_user_playlists(request: Request, user_dir_id: str):
 def api_favorites(request: Request, user: User = Depends(require_api_user)):
     page = int(request.query_params.get('page', 1))
     pp = min(int(request.query_params.get('per_page', 50)), 100)
-    
     q = Favorite.query.filter_by(user_id=user.id).order_by(Favorite.created_at.desc())
     pg = q.paginate(page=page, per_page=pp, error_out=False)
-    
     track_ids = [f.track_id for f in pg.items]
     tracks_map = {}
     if track_ids:
         tracks = Track.query.options(selectinload(Track.uploader)).filter(Track.id.in_(track_ids)).all()
         tracks_map = {t.id: t for t in tracks}
-        
     items = [tracks_map[tid] for tid in track_ids if tid in tracks_map]
-    return _json_ok({
-        'items': [serialize_track(t) for t in items],
-        'page': pg.page, 'per_page': pg.per_page,
-        'total': pg.total, 'pages': pg.pages
-    })
-
-@api_v1.api_route('/tracks/{track_dir_id}/favorite', methods=['POST', 'DELETE'])
-def api_favorite(request: Request, track_dir_id: str, user: User = Depends(require_user)):
-    t = Track.query.filter_by(track_dir_id=track_dir_id).first()
-    if not t:
-        return _json_error('not_found', 'Track not found', 404)
-    fav = Favorite.query.filter_by(user_id=user.id, track_id=t.id).first()
-    if request.method == 'DELETE':
-        if fav:
-            db.session.delete(fav)
-            commit_with_retry()
-        return _json_ok({'is_favorite': False})
-    if not fav:
-        db.session.add(Favorite(user_id=user.id, track_id=t.id))
-        commit_with_retry()
-    return _json_ok({'is_favorite': True})
+    return _json_ok({'items': [serialize_track(t) for t in items],
+                     'page': pg.page, 'per_page': pg.per_page,
+                     'total': pg.total, 'pages': pg.pages})
 
 @api_v1.get('/history')
 def api_history(request: Request, user: User = Depends(require_api_user)):
     page = int(request.query_params.get('page', 1))
     pp = min(int(request.query_params.get('per_page', 50)), 100)
-    
     subq = db.session.query(
         ListeningHistory.track_id,
         func.max(ListeningHistory.listened_at).label('max_time')
     ).filter_by(user_id=user.id).group_by(ListeningHistory.track_id).subquery()
-    
     q = db.session.query(ListeningHistory).join(
         subq, and_(ListeningHistory.track_id == subq.c.track_id,
                    ListeningHistory.listened_at == subq.c.max_time)) \
         .filter(ListeningHistory.user_id == user.id) \
         .order_by(desc(subq.c.max_time))
-        
     pg = q.paginate(page=page, per_page=pp, error_out=False)
-    
     track_ids = [row.track_id for row in pg.items]
     tracks_map = {}
     if track_ids:
         tracks = Track.query.options(selectinload(Track.uploader)).filter(Track.id.in_(track_ids)).all()
         tracks_map = {t.id: t for t in tracks}
-        
     items = []
     for row in pg.items:
         t = tracks_map.get(row.track_id)
@@ -2768,12 +2825,9 @@ def api_history(request: Request, user: User = Depends(require_api_user)):
             items.append({'track': serialize_track(t),
                           'listened_at': row.listened_at.isoformat() if row.listened_at else None,
                           'count': row.count})
-                          
-    return _json_ok({
-        'items': items,
-        'page': pg.page, 'per_page': pg.per_page,
-        'total': pg.total, 'pages': pg.pages
-    })
+    return _json_ok({'items': items,
+                     'page': pg.page, 'per_page': pg.per_page,
+                     'total': pg.total, 'pages': pg.pages})
 
 @api_v1.delete('/history/{track_dir_id}')
 def api_history_delete(request: Request, track_dir_id: str, user: User = Depends(require_api_user)):
@@ -2956,7 +3010,6 @@ async def web_tracks(request: Request, page: int = 1, per_page: int = 20, sort: 
         ))
     else:
         query = Track.query
-
     if sort == 'popular':
         query = query.order_by(Track.play_count.desc())
     elif sort == 'old':
@@ -2965,18 +3018,12 @@ async def web_tracks(request: Request, page: int = 1, per_page: int = 20, sort: 
         query = query.order_by(Track.likes_count.desc())
     else:
         query = query.order_by(Track.uploaded_at.desc())
-        
     pg = query.paginate(page=page, per_page=per_page, error_out=False)
-    
     html_content = ""
     for i, t in enumerate(pg.items):
         html_content += templates.get_template('_track_card.html').render(
-            track=t, 
-            request=request, 
-            url_for=make_url_for(request),
-            priority=(i < 2)
+            track=t, request=request, url_for=make_url_for(request), priority=(i < 2)
         )
-    
     response = HTMLResponse(content=html_content)
     response.headers['X-Has-More'] = "true" if pg.page < pg.pages else "false"
     return response
@@ -3081,16 +3128,13 @@ def api_widget_stop(token: str):
 async def ws_now_playing(ws: WebSocket):
     token = ws.query_params.get('token', '')
     user = await run_in_threadpool(find_user_by_token, token) if token else None
-    
     if not user:
         await ws.close()
         return
     await ws.accept()
     uid = user.id
-    
     with _ws_lock:
         _ws_clients.setdefault(uid, []).append(ws)
-        
     try:
         def _get_current_data():
             current = None
@@ -3100,14 +3144,11 @@ async def ws_now_playing(ws: WebSocket):
                     if current:
                         return serialize_track(current)
             return None
-
         current_data = await run_in_threadpool(_get_current_data)
-        
         if current_data:
             await ws.send_text(json.dumps({'type': 'now_playing', 'playing': True, 'track': current_data}))
         else:
             await ws.send_text(json.dumps({'type': 'now_playing', 'playing': False}))
-            
         while True:
             try:
                 await asyncio.wait_for(ws.receive_text(), timeout=60)
@@ -3129,47 +3170,777 @@ async def ws_now_playing(ws: WebSocket):
         except Exception:
             pass
 
-OPENAPI = {
-    'openapi': '3.1.0',
-    'info': {'title': 'MusicForge API', 'version': '1.0.0'},
-    'servers': [{'url': '/api/v1'}],
-    'components': {'securitySchemes': {'bearer': {'type': 'http', 'scheme': 'bearer'}}},
-    'security': [{'bearer': []}],
-    'paths': {
-        '/auth/register': {'post': {'summary': 'Register', 'security': []}},
-        '/auth/login': {'post': {'summary': 'Login', 'security': []}},
-        '/auth/refresh': {'post': {'summary': 'Refresh tokens', 'security': []}},
-        '/auth/logout': {'post': {'summary': 'Revoke tokens'}},
-        '/auth/me': {'get': {'summary': 'Current user'}},
-        '/tracks': {'get': {'summary': 'List tracks'}, 'post': {'summary': 'Upload track'}},
-        '/tracks/{id}': {'get': {'summary': 'Track by id'}, 'patch': {'summary': 'Update track'}, 'delete': {'summary': 'Delete track'}},
-        '/tracks/{id}/stream': {'get': {'summary': 'Stream audio', 'security': []}},
-        '/tracks/{id}/similar': {'get': {'summary': 'Similar tracks'}},
-        '/tracks/{id}/lyrics': {'get': {'summary': 'SRT lyrics'}},
-        '/tracks/{id}/rate': {'post': {'summary': 'Like/dislike'}},
-        '/tracks/{id}/listen': {'post': {'summary': 'Record listen'}},
-        '/tracks/{id}/favorite': {'post': {'summary': 'Add favorite'}, 'delete': {'summary': 'Remove favorite'}},
-        '/recommendations': {'get': {'summary': 'Recommendations'}},
-        '/charts': {'get': {'summary': 'Popular tracks'}},
-        '/new-releases': {'get': {'summary': 'Recent tracks'}},
-        '/search': {'get': {'summary': 'Search'}},
-        '/advanced-search': {'get': {'summary': 'Advanced filter'}},
-        '/tags': {'get': {'summary': 'Tag autocomplete'}},
-        '/users/{id}': {'get': {'summary': 'User profile'}},
-        '/users/{id}/tracks': {'get': {'summary': 'User tracks'}},
-        '/users/{id}/playlists': {'get': {'summary': 'User playlists'}},
-        '/favorites': {'get': {'summary': 'My favorites'}},
-        '/history': {'get': {'summary': 'My history'}},
-        '/history/{id}': {'delete': {'summary': 'Delete history entry'}},
-        '/playlists': {'get': {'summary': 'My playlists'}, 'post': {'summary': 'Create playlist'}},
-        '/playlists/{id}': {'get': {'summary': 'Get playlist'}, 'patch': {'summary': 'Update'}, 'delete': {'summary': 'Delete'}},
-        '/playlists/{id}/tracks': {'post': {'summary': 'Add track'}},
-        '/playlists/{id}/tracks/{tid}': {'delete': {'summary': 'Remove track'}},
-        '/playlists/{id}/reorder': {'post': {'summary': 'Reorder tracks'}},
-        '/webhooks': {'get': {'summary': 'List webhooks'}, 'post': {'summary': 'Create webhook'}},
-        '/webhooks/{id}': {'delete': {'summary': 'Delete webhook'}},
+
+def _schema_ref(name):
+    return {'$ref': f'#/components/schemas/{name}'}
+
+def _q(name, schema, desc='', example=None):
+    p = {'name': name, 'in': 'query', 'schema': schema, 'description': desc}
+    if example is not None:
+        p['example'] = example
+    return p
+
+def _path(name, desc=''):
+    return {'name': name, 'in': 'path', 'required': True, 'schema': {'type': 'string'}, 'description': desc}
+
+def _json_body(schema, required=True, example=None):
+    media = {'schema': schema}
+    if example is not None:
+        media['example'] = example
+    return {'required': required, 'content': {'application/json': media}}
+
+def _multipart_body(schema, required=True):
+    return {'required': required, 'content': {'multipart/form-data': {'schema': schema}}}
+
+def _ok(schema=None, desc='OK', example=None):
+    r = {'description': desc}
+    if schema is not None:
+        media = {'schema': schema}
+        if example is not None:
+            media['example'] = example
+        r['content'] = {'application/json': media}
+    return r
+
+def _err(desc):
+    return {'description': desc, 'content': {'application/json': {'schema': _schema_ref('Error')}}}
+
+def _envelope(data_schema):
+    return {'type': 'object', 'properties': {
+        'ok': {'type': 'boolean', 'enum': [True]},
+        'data': data_schema,
+    }}
+
+def _items_envelope(item_schema):
+    return _envelope({'type': 'object', 'properties': {
+        'items': {'type': 'array', 'items': item_schema},
+    }})
+
+def _op(summary, tag, responses, body=None, params=None, security=True, description=''):
+    op = {'summary': summary, 'tags': [tag], 'responses': responses}
+    if description:
+        op['description'] = description
+    if params:
+        op['parameters'] = params
+    if body is not None:
+        op['requestBody'] = body
+    op['security'] = [{'bearer': []}] if security else []
+    return op
+
+def _track_list_schema():
+    return _envelope({
+        'type': 'object',
+        'properties': {
+            'items': {'type': 'array', 'items': _schema_ref('Track')},
+            'page': {'type': 'integer'},
+            'per_page': {'type': 'integer'},
+            'total': {'type': 'integer'},
+            'pages': {'type': 'integer'},
+        },
+    })
+
+def _track_envelope():
+    return _envelope(_schema_ref('Track'))
+
+def _playlist_envelope():
+    return _envelope(_schema_ref('Playlist'))
+
+def _user_envelope():
+    return _envelope(_schema_ref('User'))
+
+def _auth_tokens_schema():
+    return _envelope({
+        'type': 'object',
+        'properties': {
+            'access_token': {'type': 'string'},
+            'refresh_token': {'type': 'string'},
+            'token_type': {'type': 'string', 'enum': ['Bearer']},
+            'user': _schema_ref('User'),
+        },
+        'required': ['access_token', 'refresh_token', 'token_type', 'user'],
+    })
+
+_TAGS = [
+    {'name': 'auth', 'description': 'Регистрация, вход, refresh/logout токенов'},
+    {'name': 'tracks', 'description': 'Загрузка, редактирование, воспроизведение треков'},
+    {'name': 'discovery', 'description': 'Рекомендации, чарты, новинки, поиск'},
+    {'name': 'playlists', 'description': 'Плейлисты'},
+    {'name': 'users', 'description': 'Профили пользователей'},
+    {'name': 'social', 'description': 'Избранное и история прослушиваний'},
+    {'name': 'webhooks', 'description': 'Уведомления на внешние URL'},
+]
+
+_FAVORITE_RESPONSE = {
+    'type': 'object',
+    'properties': {
+        'status': {'type': 'string', 'enum': ['added', 'removed']},
+        'ok': {'type': 'boolean', 'enum': [True]},
+        'is_favorite': {'type': 'boolean'},
+        'data': {
+            'type': 'object',
+            'properties': {'is_favorite': {'type': 'boolean'}},
+        },
     },
 }
+
+_HISTORY_ITEM = {
+    'type': 'object',
+    'properties': {
+        'track': _schema_ref('Track'),
+        'listened_at': {'type': 'string', 'format': 'date-time'},
+        'count': {'type': 'integer'},
+    },
+}
+
+
+OPENAPI = {
+    'openapi': '3.1.0',
+    'info': {
+        'title': 'MusicForge API',
+        'version': '1.0.0',
+        'description': (
+            'REST API для MusicForge. Все защищённые эндпоинты требуют Bearer-токен '
+            '(получается через /auth/login или /auth/register). '
+            'Файлы загружаются через multipart/form-data. '
+            'Ответы без `ok`-обёртки (например, /tracks/{id}/rate) возвращают данные напрямую.'
+        ),
+    },
+    'servers': [{'url': '/api/v1'}],
+    'tags': _TAGS,
+    'components': {
+        'securitySchemes': {
+            'bearer': {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'opaque'}
+        },
+        'schemas': {
+            'Error': {
+                'type': 'object',
+                'properties': {
+                    'ok': {'type': 'boolean', 'enum': [False]},
+                    'error': {
+                        'type': 'object',
+                        'properties': {
+                            'code': {'type': 'string'},
+                            'message': {'type': 'string'},
+                        },
+                        'required': ['code', 'message'],
+                    },
+                },
+                'required': ['ok', 'error'],
+            },
+            'User': {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'string', 'description': 'user_dir_id'},
+                    'login': {'type': 'string'},
+                    'display_name': {'type': 'string'},
+                    'bio': {'type': 'string'},
+                    'is_admin': {'type': 'boolean'},
+                    'avatar_url': {'type': 'string'},
+                    'web_url': {'type': 'string'},
+                    'tracks_count': {'type': 'integer'},
+                    'total_likes': {'type': 'integer'},
+                    'total_plays': {'type': 'integer'},
+                },
+            },
+            'Track': {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'string', 'description': 'track_dir_id'},
+                    'title': {'type': 'string'},
+                    'artist': {'type': 'string'},
+                    'artist_id': {'type': 'string'},
+                    'artist_username': {'type': 'string'},
+                    'is_ai': {'type': 'boolean'},
+                    'tags': {'type': 'array', 'items': {'type': 'string'}},
+                    'release_date': {'type': 'string', 'format': 'date-time'},
+                    'cover_url': {'type': 'string'},
+                    'video_url': {'type': ['string', 'null']},
+                    'audio_url': {'type': 'string'},
+                    'play_count': {'type': 'integer'},
+                    'likes': {'type': 'integer'},
+                    'dislikes': {'type': 'integer'},
+                    'web_url': {'type': 'string'},
+                    'lyrics': {'type': ['string', 'null']},
+                    'is_favorite': {'type': 'boolean'},
+                    'user_rating': {'type': 'integer', 'enum': [-1, 0, 1]},
+                    'in_playlists': {'type': 'array', 'items': {'type': 'string'}},
+                },
+            },
+            'Playlist': {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'string', 'description': 'playlist_dir_id'},
+                    'name': {'type': 'string'},
+                    'owner': {'type': 'string'},
+                    'owner_id': {'type': 'string'},
+                    'is_public': {'type': 'boolean'},
+                    'track_count': {'type': 'integer'},
+                    'web_url': {'type': 'string'},
+                    'tracks': {'type': 'array', 'items': _schema_ref('Track')},
+                },
+            },
+            'Webhook': {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'integer'},
+                    'url': {'type': 'string', 'format': 'uri'},
+                    'events': {'type': 'array', 'items': {'type': 'string'}},
+                    'active': {'type': 'boolean'},
+                    'secret': {'type': 'string'},
+                },
+            },
+            'RegisterRequest': {
+                'type': 'object',
+                'required': ['login', 'email', 'password'],
+                'properties': {
+                    'login': {'type': 'string', 'minLength': 3},
+                    'email': {'type': 'string', 'format': 'email'},
+                    'password': {'type': 'string', 'minLength': 8},
+                    'display_name': {'type': 'string'},
+                },
+            },
+            'LoginRequest': {
+                'type': 'object',
+                'required': ['login', 'password'],
+                'properties': {
+                    'login': {'type': 'string', 'description': 'Логин или email'},
+                    'password': {'type': 'string'},
+                },
+            },
+            'RefreshRequest': {
+                'type': 'object',
+                'required': ['refresh_token'],
+                'properties': {'refresh_token': {'type': 'string'}},
+            },
+            'ExchangeRequest': {
+                'type': 'object',
+                'required': ['code'],
+                'properties': {'code': {'type': 'string', 'description': 'Одноразовый desktop-код'}},
+            },
+            'RateRequest': {
+                'type': 'object',
+                'required': ['value'],
+                'properties': {'value': {'type': 'integer', 'enum': [1, -1]}},
+            },
+            'ReorderRequest': {
+                'type': 'object',
+                'required': ['order'],
+                'properties': {'order': {'type': 'array', 'items': {'type': 'string'}}},
+            },
+            'PlaylistCreateRequest': {
+                'type': 'object',
+                'required': ['name'],
+                'properties': {
+                    'name': {'type': 'string'},
+                    'is_public': {'type': 'boolean', 'default': False},
+                },
+            },
+            'PlaylistUpdateRequest': {
+                'type': 'object',
+                'properties': {
+                    'name': {'type': 'string'},
+                    'is_public': {'type': 'boolean'},
+                },
+            },
+            'PlaylistAddTrackRequest': {
+                'type': 'object',
+                'properties': {
+                    'track_id': {'type': 'string', 'description': 'track_dir_id'},
+                    'track_dir_id': {'type': 'string'},
+                },
+            },
+            'WebhookCreateRequest': {
+                'type': 'object',
+                'required': ['url'],
+                'properties': {
+                    'url': {'type': 'string', 'format': 'uri'},
+                    'events': {
+                        'oneOf': [
+                            {'type': 'string', 'description': 'Через запятую, например listen,upload'},
+                            {'type': 'array', 'items': {'type': 'string'}},
+                        ],
+                    },
+                },
+            },
+            'UploadTrack': {
+                'type': 'object',
+                'properties': {
+                    'upload_type': {'type': 'string', 'enum': ['file', 'youtube'], 'default': 'file'},
+                    'title': {'type': 'string'},
+                    'tags': {'type': 'string', 'description': 'Через запятую'},
+                    'is_ai': {'type': 'string', 'enum': ['', 'true', 'false', '1', '0', 'yes', 'no', 'on']},
+                    'artist_name': {'type': 'string'},
+                    'youtube_url': {'type': 'string', 'format': 'uri'},
+                    'audio_file': {'type': 'string', 'format': 'binary'},
+                    'cover_file': {'type': 'string', 'format': 'binary'},
+                    'cover_video_file': {'type': 'string', 'format': 'binary'},
+                    'lyrics_file': {'type': 'string', 'format': 'binary'},
+                },
+            },
+            'UpdateTrack': {
+                'type': 'object',
+                'properties': {
+                    'title': {'type': 'string'},
+                    'artist_name': {'type': 'string'},
+                    'tags': {'type': 'string'},
+                    'is_ai': {'type': 'string', 'enum': ['', 'true', 'false', '1', '0', 'yes', 'no', 'on']},
+                    'cover_file': {'type': 'string', 'format': 'binary'},
+                    'lyrics_file': {'type': 'string', 'format': 'binary'},
+                },
+            },
+            'UpdateMe': {
+                'type': 'object',
+                'properties': {
+                    'display_name': {'type': 'string'},
+                    'bio': {'type': 'string'},
+                    'avatar_file': {'type': 'string', 'format': 'binary'},
+                },
+            },
+        },
+    },
+    'paths': {
+        '/auth/register': {
+            'post': _op(
+                'Регистрация', 'auth',
+                {'201': _ok(_auth_tokens_schema(), 'Пользователь создан'),
+                 '400': _err('Некорректные данные'),
+                 '409': _err('Логин или email заняты')},
+                body=_json_body(_schema_ref('RegisterRequest')),
+                security=False,
+            )
+        },
+        '/auth/login': {
+            'post': _op(
+                'Вход', 'auth',
+                {'200': _ok(_auth_tokens_schema(), 'Успешный вход'),
+                 '401': _err('Неверные учётные данные')},
+                body=_json_body(_schema_ref('LoginRequest'),
+                                example={'login': 'alice', 'password': 'secret123'}),
+                security=False,
+            )
+        },
+        '/auth/exchange': {
+            'post': _op(
+                'Обмен desktop-кода на токены', 'auth',
+                {'200': _ok(_auth_tokens_schema(), 'Токены выданы'),
+                 '401': _err('Код неверен или истёк')},
+                body=_json_body(_schema_ref('ExchangeRequest')),
+                security=False,
+            )
+        },
+        '/auth/refresh': {
+            'post': _op(
+                'Обновить access/refresh токены', 'auth',
+                {'200': _ok(_auth_tokens_schema(), 'Новые токены'),
+                 '401': _err('Refresh-токен недействителен')},
+                body=_json_body(_schema_ref('RefreshRequest')),
+                security=False,
+            )
+        },
+        '/auth/logout': {
+            'post': _op(
+                'Отозвать токены', 'auth',
+                {'200': _ok(None, 'Токены отозваны')},
+            )
+        },
+        '/auth/me': {
+            'get': _op(
+                'Текущий пользователь', 'auth',
+                {'200': _ok(_user_envelope(), 'Информация о пользователе'),
+                 '401': _err('Не авторизован')},
+            )
+        },
+        '/users/me': {
+            'patch': _op(
+                'Обновить профиль', 'auth',
+                {'200': _ok(_user_envelope(), 'Обновлено'),
+                 '500': _err('Ошибка сохранения')},
+                body=_multipart_body(_schema_ref('UpdateMe')),
+            )
+        },
+        '/tracks': {
+            'get': _op(
+                'Список треков', 'tracks',
+                {'200': _ok(_track_list_schema(), 'OK')},
+                params=[
+                    _q('page', {'type': 'integer', 'default': 1}),
+                    _q('per_page', {'type': 'integer', 'default': 20, 'maximum': 100}),
+                    _q('sort', {'type': 'string', 'enum': ['new', 'popular', 'likes'], 'default': 'new'}),
+                ],
+                security=False,
+            ),
+            'post': _op(
+                'Загрузить трек (файл или YouTube)', 'tracks',
+                {'200': _ok(_track_envelope(), 'Трек создан'),
+                 '400': _err('Некорректный запрос'),
+                 '500': _err('Ошибка сервера')},
+                body=_multipart_body(_schema_ref('UploadTrack')),
+            ),
+        },
+        '/tracks/{track_dir_id}': {
+            'get': _op(
+                'Трек по id', 'tracks',
+                {'200': _ok(_track_envelope(), 'OK'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+                security=False,
+            ),
+            'patch': _op(
+                'Обновить трек', 'tracks',
+                {'200': _ok(_track_envelope(), 'Обновлено'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+                body=_multipart_body(_schema_ref('UpdateTrack')),
+            ),
+            'delete': _op(
+                'Удалить трек', 'tracks',
+                {'200': _ok(None, 'Удалено'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+            ),
+        },
+        '/tracks/{track_dir_id}/stream': {
+            'get': _op(
+                'Аудиопоток', 'tracks',
+                {'200': {'description': 'Бинарный аудио-поток', 'content': {
+                    'audio/mpeg': {'schema': {'type': 'string', 'format': 'binary'}},
+                    'audio/wav': {'schema': {'type': 'string', 'format': 'binary'}},
+                    'audio/ogg': {'schema': {'type': 'string', 'format': 'binary'}},
+                    'audio/mp4': {'schema': {'type': 'string', 'format': 'binary'}},
+                }},
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+                security=False,
+            )
+        },
+        '/tracks/{track_dir_id}/similar': {
+            'get': _op(
+                'Похожие треки', 'discovery',
+                {'200': _ok(_items_envelope(_schema_ref('Track')), 'OK'),
+                 '404': _err('Не найден')},
+                params=[
+                    _path('track_dir_id'),
+                    _q('limit', {'type': 'integer', 'default': 6, 'maximum': 30}),
+                ],
+                security=False,
+            )
+        },
+        '/tracks/{track_dir_id}/lyrics': {
+            'get': _op(
+                'SRT-субтитры', 'tracks',
+                {'200': _ok(_envelope({
+                    'type': 'object',
+                    'properties': {'lyrics': {'type': ['string', 'null']}},
+                }), 'OK'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+                security=False,
+            )
+        },
+        '/tracks/{track_dir_id}/status': {
+            'get': _op(
+                'Статус трека для текущего пользователя', 'tracks',
+                {'200': _ok({
+                    'type': 'object',
+                    'properties': {
+                        'is_favorite': {'type': 'boolean'},
+                        'playlist_ids': {'type': 'array', 'items': {'type': 'string'}},
+                        'user_rating': {'type': 'integer', 'enum': [-1, 0, 1]},
+                        'likes': {'type': 'integer'},
+                        'dislikes': {'type': 'integer'},
+                        'plays': {'type': 'integer'},
+                    },
+                }, 'OK'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+            )
+        },
+        '/tracks/{track_dir_id}/rate': {
+            'post': _op(
+                'Лайк/дизлайк', 'tracks',
+                {'200': _ok({
+                    'type': 'object',
+                    'properties': {
+                        'likes': {'type': 'integer'},
+                        'dislikes': {'type': 'integer'},
+                        'user_rating': {'type': 'integer', 'enum': [-1, 0, 1]},
+                    },
+                }, 'OK'),
+                 '400': _err('Неверное значение'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+                body=_json_body(_schema_ref('RateRequest'), example={'value': 1}),
+            )
+        },
+        '/tracks/{track_dir_id}/listen': {
+            'post': _op(
+                'Записать прослушивание', 'tracks',
+                {'200': _ok(None, 'OK (или status=throttled)'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+            )
+        },
+        '/tracks/{track_dir_id}/favorite': {
+            'post': _op(
+                'Добавить/переключить избранное', 'social',
+                {'200': _ok(_FAVORITE_RESPONSE, 'OK'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+            ),
+            'delete': _op(
+                'Убрать из избранного', 'social',
+                {'200': _ok(_FAVORITE_RESPONSE, 'OK'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+            ),
+        },
+        '/recommendations': {
+            'get': _op(
+                'Рекомендации', 'discovery',
+                {'200': _ok(_items_envelope(_schema_ref('Track')), 'OK')},
+                params=[_q('limit', {'type': 'integer', 'default': 16, 'maximum': 50})],
+                security=False,
+            )
+        },
+        '/charts': {
+            'get': _op(
+                'Популярные треки', 'discovery',
+                {'200': _ok(_items_envelope(_schema_ref('Track')), 'OK')},
+                params=[
+                    _q('period', {'type': 'integer', 'default': 30, 'description': 'Дней'}),
+                    _q('limit', {'type': 'integer', 'default': 50, 'maximum': 200}),
+                ],
+                security=False,
+            )
+        },
+        '/new-releases': {
+            'get': _op(
+                'Новинки', 'discovery',
+                {'200': _ok(_items_envelope(_schema_ref('Track')), 'OK')},
+                params=[
+                    _q('days', {'type': 'integer', 'default': 7}),
+                    _q('limit', {'type': 'integer', 'default': 20, 'maximum': 100}),
+                ],
+                security=False,
+            )
+        },
+        '/search': {
+            'get': _op(
+                'Поиск', 'discovery',
+                {'200': _ok(None, 'OK')},
+                params=[
+                    _q('q', {'type': 'string'}),
+                    _q('type', {'type': 'string', 'enum': ['tracks', 'playlists', 'users', 'tags'], 'default': 'tracks'}),
+                    _q('limit', {'type': 'integer', 'default': 20, 'maximum': 100}),
+                ],
+                security=False,
+            )
+        },
+        '/advanced-search': {
+            'get': _op(
+                'Расширенный фильтр', 'discovery',
+                {'200': _ok(_items_envelope(_schema_ref('Track')), 'OK')},
+                params=[
+                    _q('title', {'type': 'string'}),
+                    _q('artist', {'type': 'string'}),
+                    _q('tag', {'type': 'string'}),
+                    _q('is_ai', {'type': 'string', 'enum': ['yes', 'no']}),
+                    _q('limit', {'type': 'integer', 'default': 50, 'maximum': 200}),
+                ],
+                security=False,
+            )
+        },
+        '/tags': {
+            'get': _op(
+                'Автодополнение тегов', 'discovery',
+                {'200': _ok(_items_envelope({
+                    'type': 'object',
+                    'properties': {'name': {'type': 'string'}},
+                }), 'OK')},
+                params=[
+                    _q('q', {'type': 'string'}),
+                    _q('limit', {'type': 'integer', 'default': 20, 'maximum': 100}),
+                ],
+                security=False,
+            )
+        },
+        '/users/{user_dir_id}': {
+            'get': _op(
+                'Профиль пользователя', 'users',
+                {'200': _ok(_user_envelope(), 'OK'),
+                 '404': _err('Не найден')},
+                params=[_path('user_dir_id')],
+                security=False,
+            )
+        },
+        '/users/{user_dir_id}/tracks': {
+            'get': _op(
+                'Треки пользователя', 'users',
+                {'200': _ok(_track_list_schema(), 'OK'),
+                 '404': _err('Не найден')},
+                params=[
+                    _path('user_dir_id'),
+                    _q('page', {'type': 'integer', 'default': 1}),
+                    _q('per_page', {'type': 'integer', 'default': 20, 'maximum': 100}),
+                    _q('sort', {'type': 'string', 'enum': ['new', 'popular', 'old'], 'default': 'new'}),
+                ],
+                security=False,
+            )
+        },
+        '/users/{user_dir_id}/playlists': {
+            'get': _op(
+                'Плейлисты пользователя', 'users',
+                {'200': _ok(_items_envelope(_schema_ref('Playlist')), 'OK'),
+                 '404': _err('Не найден')},
+                params=[_path('user_dir_id')],
+                security=False,
+            )
+        },
+        '/favorites': {
+            'get': _op(
+                'Моё избранное', 'social',
+                {'200': _ok(_track_list_schema(), 'OK'),
+                 '401': _err('Не авторизован')},
+                params=[
+                    _q('page', {'type': 'integer', 'default': 1}),
+                    _q('per_page', {'type': 'integer', 'default': 50, 'maximum': 100}),
+                ],
+            )
+        },
+        '/history': {
+            'get': _op(
+                'История прослушиваний', 'social',
+                {'200': _ok(_envelope({
+                    'type': 'object',
+                    'properties': {
+                        'items': {'type': 'array', 'items': _HISTORY_ITEM},
+                        'page': {'type': 'integer'},
+                        'per_page': {'type': 'integer'},
+                        'total': {'type': 'integer'},
+                        'pages': {'type': 'integer'},
+                    },
+                }), 'OK'),
+                 '401': _err('Не авторизован')},
+                params=[
+                    _q('page', {'type': 'integer', 'default': 1}),
+                    _q('per_page', {'type': 'integer', 'default': 50, 'maximum': 100}),
+                ],
+            )
+        },
+        '/history/{track_dir_id}': {
+            'delete': _op(
+                'Удалить из истории', 'social',
+                {'200': _ok(None, 'Удалено'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[_path('track_dir_id')],
+            )
+        },
+        '/playlists': {
+            'get': _op(
+                'Мои плейлисты', 'playlists',
+                {'200': _ok(_items_envelope(_schema_ref('Playlist')), 'OK'),
+                 '401': _err('Не авторизован')},
+            ),
+            'post': _op(
+                'Создать плейлист', 'playlists',
+                {'200': _ok(_playlist_envelope(), 'Создан'),
+                 '400': _err('Некорректное имя'),
+                 '401': _err('Не авторизован')},
+                body=_json_body(_schema_ref('PlaylistCreateRequest'),
+                                example={'name': 'Road trip', 'is_public': False}),
+            ),
+        },
+        '/playlists/{playlist_dir_id}': {
+            'get': _op(
+                'Получить плейлист', 'playlists',
+                {'200': _ok(_playlist_envelope(), 'OK'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('playlist_dir_id')],
+                security=False,
+            ),
+            'patch': _op(
+                'Обновить плейлист', 'playlists',
+                {'200': _ok(_playlist_envelope(), 'OK'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('playlist_dir_id')],
+                body=_json_body(_schema_ref('PlaylistUpdateRequest'), required=False),
+            ),
+            'delete': _op(
+                'Удалить плейлист', 'playlists',
+                {'200': _ok(None, 'Удалён'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('playlist_dir_id')],
+            ),
+        },
+        '/playlists/{playlist_dir_id}/tracks': {
+            'post': _op(
+                'Добавить трек в плейлист', 'playlists',
+                {'200': _ok(None, 'OK (track_count)'),
+                 '400': _err('Нет track_id'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('playlist_dir_id')],
+                body=_json_body(_schema_ref('PlaylistAddTrackRequest'),
+                                example={'track_id': 'abc123def456'}),
+            )
+        },
+        '/playlists/{playlist_dir_id}/tracks/{track_dir_id}': {
+            'delete': _op(
+                'Убрать трек из плейлиста', 'playlists',
+                {'200': _ok(None, 'OK'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('playlist_dir_id'), _path('track_dir_id')],
+            )
+        },
+        '/playlists/{playlist_dir_id}/reorder': {
+            'post': _op(
+                'Переупорядочить треки', 'playlists',
+                {'200': _ok(None, 'OK'),
+                 '403': _err('Нет доступа'),
+                 '404': _err('Не найден')},
+                params=[_path('playlist_dir_id')],
+                body=_json_body(_schema_ref('ReorderRequest'),
+                                example={'order': ['abc123def456', 'fed321cba654']}),
+            )
+        },
+        '/webhooks': {
+            'get': _op(
+                'Мои webhooks', 'webhooks',
+                {'200': _ok(_items_envelope(_schema_ref('Webhook')), 'OK'),
+                 '401': _err('Не авторизован')},
+            ),
+            'post': _op(
+                'Создать webhook', 'webhooks',
+                {'200': _ok(_schema_ref('Webhook'), 'Создан (с secret)'),
+                 '400': _err('Некорректный URL'),
+                 '401': _err('Не авторизован')},
+                body=_json_body(_schema_ref('WebhookCreateRequest'),
+                                example={'url': 'https://example.com/hook', 'events': ['listen', 'upload']}),
+            ),
+        },
+        '/webhooks/{wid}': {
+            'delete': _op(
+                'Удалить webhook', 'webhooks',
+                {'200': _ok(None, 'Удалён'),
+                 '401': _err('Не авторизован'),
+                 '404': _err('Не найден')},
+                params=[{'name': 'wid', 'in': 'path', 'required': True, 'schema': {'type': 'integer'}}],
+            )
+        },
+    },
+}
+
 
 @app.get('/api/v1/openapi.json')
 def openapi_spec():
@@ -3182,7 +3953,14 @@ def openapi_docs():
 <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head>
 <body><div id="ui"></div>
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-<script>SwaggerUIBundle({url:'/api/v1/openapi.json',dom_id:'#ui'});</script>
+<script>SwaggerUIBundle({
+  url: '/api/v1/openapi.json',
+  dom_id: '#ui',
+  persistAuthorization: true,
+  tryItOutEnabled: true,
+  displayRequestDuration: true,
+  filter: true
+});</script>
 </body></html>'''
     return HTMLResponse(html)
 

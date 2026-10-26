@@ -36,6 +36,12 @@
         <label class="form-label">Субтитры (файл .srt)</label>
         <input type="file" name="lyrics_file" class="form-control" accept=".srt">
     </div>
+    {% if track.lyrics_filename %}
+    <div class="mb-3 form-check">
+        <input type="checkbox" name="delete_lyrics" id="delete_lyrics" class="form-check-input">
+        <label class="form-check-label" for="delete_lyrics">Удалить субтитры (.srt)</label>
+    </div>
+    {% endif %}
     <div class="upload-progress" id="uploadProgressWrapper" style="display:none;">
         <div class="upload-progress-bar"><div class="upload-progress-fill" id="uploadProgressFill"></div></div>
         <div class="upload-progress-text" id="uploadProgressText">Загрузка...</div>

@@ -16,15 +16,25 @@ from fastapi import HTTPException
 
 DATABASE_URI = os.environ.get('DATABASE_URI', 'sqlite:///musicforge.db')
 
+_is_sqlite = DATABASE_URI.startswith('sqlite')
 _connect_args = {}
-if DATABASE_URI.startswith('sqlite'):
+_pool_kwargs = {}
+
+if _is_sqlite:
     _connect_args = {'timeout': 60, 'check_same_thread': False}
+    _pool_kwargs = {'poolclass': NullPool, 'pool_pre_ping': True}
+else:
+    _pool_kwargs = {
+        'pool_pre_ping': True,
+        'pool_size': int(os.environ.get('DB_POOL_SIZE', '10')),
+        'max_overflow': int(os.environ.get('DB_MAX_OVERFLOW', '20')),
+        'pool_recycle': 1800,
+    }
 
 engine = create_engine(
     DATABASE_URI,
     connect_args=_connect_args,
-    poolclass=NullPool,
-    pool_pre_ping=True,
+    **_pool_kwargs,
 )
 
 
@@ -129,9 +139,6 @@ class _DB:
     def create_all(self):
         Base.metadata.create_all(engine)
 
-    def drop_all(self):
-        Base.metadata.drop_all(engine)
-
 
 db = _DB()
 
@@ -179,14 +186,6 @@ class User(Base):
     def get_id(self):
         return str(self.id)
 
-    def set_password(self, password):
-        from werkzeug.security import generate_password_hash
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        from werkzeug.security import check_password_hash
-        return check_password_hash(self.password_hash, password)
-
 
 class Track(Base):
     __tablename__ = 'track'
@@ -204,7 +203,10 @@ class Track(Base):
     dislikes_count = Column(Integer, default=0, nullable=False)
     artist_name = Column(String(200), nullable=True, index=True)
     lyrics_filename = Column(String(64), nullable=True)
-    __table_args__ = (Index('ix_track_ai_uploaded', 'is_ai', 'uploaded_at'),)
+    __table_args__ = (
+        Index('ix_track_ai_uploaded', 'is_ai', 'uploaded_at'),
+        Index('ix_track_uploader_uploaded', 'uploader_id', 'uploaded_at'),
+    )
 
 
 class Playlist(Base):

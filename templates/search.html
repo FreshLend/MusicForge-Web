@@ -16,7 +16,7 @@
 {% block scripts %}
 {% if tracks %}
 <script>
-    window.initInfiniteScroll('tracks-grid', 'infinite-sentinel', '/api/web/tracks', 'new', '{{ query }}');
+    window.initInfiniteScroll('tracks-grid', 'infinite-sentinel', '/api/web/tracks', 'new', {{ query|tojson }});
 </script>
 {% endif %}
 {% endblock %}
